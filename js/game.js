@@ -374,15 +374,15 @@ export class Game {
     this.tether.followProgress(s.progress);
 
     // Companion + climber
-    this.climber.setPosition(s.playerX, 0, 0.5);
+    this.climber.setPosition(s.playerX, 0.18, 1.4);
     this.climber.update(dt, { playerVX: s.playerVX, climbing: s.climbing });
     this.companion.update(dt, {
       playerX: s.playerX,
-      playerZ: 0.5,
+      playerZ: 1.4,
     });
 
     // Tether dynamic segment
-    this.tether.update(dt, { x: s.playerX, y: 0, z: 0.5, vx: s.playerVX });
+    this.tether.update(dt, { x: s.playerX, y: 0.18, z: 1.4, vx: s.playerVX });
 
     // Mountain tint & atmospherics
     this.mountain.tintByPreset(s.preset, s.phaseRatio);
@@ -456,10 +456,10 @@ export class Game {
     const cam = this.stage.camera;
     if (this.panorama.active) return; // panorama controls camera directly
 
-    // "Over the shoulder": slightly above and behind, offset from player X.
-    const targetX = s.playerX * 0.35;
-    const targetY = 4.2 + Math.sin(performance.now() * 0.0022) * 0.08;
-    const targetZ = 13.5 + s.playerVX * 0.015;
+    // "Over the shoulder": close in behind the climber's right shoulder.
+    const targetX = s.playerX * 0.32 + 0.6;
+    const targetY = 2.7 + Math.sin(performance.now() * 0.0022) * 0.08;
+    const targetZ = 7.0 + s.playerVX * 0.012;
     cam.position.x = lerp(cam.position.x, targetX, Math.min(1, dt * 3.5));
     cam.position.y = lerp(cam.position.y, targetY, Math.min(1, dt * 2.5));
     cam.position.z = lerp(cam.position.z, targetZ, Math.min(1, dt * 3.5));
@@ -476,7 +476,17 @@ export class Game {
       s.shake = Math.max(0, s.shake - dt * 2.4);
     }
 
-    cam.lookAt(s.playerX * 0.2, 1.6, 0);
+    cam.lookAt(s.playerX * 0.18, 1.5, -0.4);
+
+    // Climber key light tracks the player so the jacket stays bright in any
+    // weather.
+    if (this.stage.climberKey) {
+      this.stage.climberKey.position.set(
+        s.playerX + 1.2,
+        3.0,
+        4.6
+      );
+    }
   }
 
   _render() { this.stage.render(); }

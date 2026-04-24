@@ -21,8 +21,8 @@ export class SceneStage {
     this.resize();
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x1a2834, 48, 190);
-    this.scene.background = new THREE.Color(0x1a2834);
+    this.scene.fog = new THREE.Fog(0x0e1825, 22, 110);
+    this.scene.background = new THREE.Color(0x0e1825);
 
     this.camera = new THREE.PerspectiveCamera(
       74,
@@ -30,7 +30,7 @@ export class SceneStage {
       0.1,
       600
     );
-    this.camera.position.set(0, 4, 14);
+    this.camera.position.set(0, 2.6, 7.2);
 
     this._lights();
     this._sky();
@@ -56,11 +56,11 @@ export class SceneStage {
   }
 
   _lights() {
-    this.hemi = new THREE.HemisphereLight(0xcfe0ff, 0x3b4a5c, 0.7);
+    this.hemi = new THREE.HemisphereLight(0x9fb6d8, 0x1e2a3a, 0.55);
     this.scene.add(this.hemi);
 
-    this.sun = new THREE.DirectionalLight(0xffe2b8, 0.9);
-    this.sun.position.set(14, 28, 18);
+    this.sun = new THREE.DirectionalLight(0xffe2b8, 1.1);
+    this.sun.position.set(10, 18, 14);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
     this.sun.shadow.camera.near = 1;
@@ -70,6 +70,16 @@ export class SceneStage {
     this.sun.shadow.camera.top = 30;
     this.sun.shadow.camera.bottom = -30;
     this.scene.add(this.sun);
+
+    // Cool rim light from upper-left, makes the climber silhouette pop.
+    this.rim = new THREE.DirectionalLight(0x8ab2d6, 0.45);
+    this.rim.position.set(-8, 14, -4);
+    this.scene.add(this.rim);
+
+    // Climber key light — close, tracks player, keeps the red jacket bright.
+    this.climberKey = new THREE.PointLight(0xfff1d0, 1.1, 14, 1.6);
+    this.climberKey.position.set(0.5, 4, 5);
+    this.scene.add(this.climberKey);
 
     // Fill from below (warm glow in vulcanic phase).
     this.warmFill = new THREE.PointLight(0xff7a35, 0.0, 80, 2);
@@ -82,9 +92,9 @@ export class SceneStage {
     const geo = new THREE.SphereGeometry(420, 32, 16);
     const colors = new Float32Array(geo.attributes.position.count * 3);
     const pos = geo.attributes.position;
-    const top = new THREE.Color(0x0c1b30);
-    const mid = new THREE.Color(0x2a4568);
-    const bot = new THREE.Color(0x5a7ea6);
+    const top = new THREE.Color(0x040810);
+    const mid = new THREE.Color(0x14243a);
+    const bot = new THREE.Color(0x24364f);
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i) / 420;
       let c;
@@ -244,16 +254,16 @@ export class SceneStage {
   setPreset(preset) {
     this.preset = preset;
     if (preset === "newyear") {
-      this.scene.fog = new THREE.Fog(0x0a1223, 48, 190);
-      this.scene.background = new THREE.Color(0x0a1223);
+      this.scene.fog = new THREE.Fog(0x06101e, 22, 110);
+      this.scene.background = new THREE.Color(0x06101e);
       this.starMat.opacity = 0.95;
       this.hemi.color = new THREE.Color(0x8ea5c7);
       this.hemi.groundColor = new THREE.Color(0x1a2a40);
       this.sun.color = new THREE.Color(0xcfd8ff);
       this.sun.intensity = 0.45;
     } else {
-      this.scene.fog = new THREE.Fog(0x1a2834, 48, 190);
-      this.scene.background = new THREE.Color(0x1a2834);
+      this.scene.fog = new THREE.Fog(0x0e1825, 22, 110);
+      this.scene.background = new THREE.Color(0x0e1825);
       this.starMat.opacity = 0.0;
       this.hemi.color = new THREE.Color(0xcfe0ff);
       this.hemi.groundColor = new THREE.Color(0x3b4a5c);
@@ -288,8 +298,8 @@ export class SceneStage {
     }
 
     // Serenity softens the fog.
-    this.scene.fog.near = lerp(46, 60, serenity);
-    this.scene.fog.far  = lerp(160, 210, serenity);
+    this.scene.fog.near = lerp(20, 30, serenity);
+    this.scene.fog.far  = lerp(105, 140, serenity);
 
     // Cloud sea appears after ~0.5 progress
     this.cloudSea.visible = progress > 48;

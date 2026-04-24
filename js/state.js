@@ -88,7 +88,7 @@ export function createState() {
     panoramaPhase: null,       // "in" | "hold" | "out" | null
 
     // Visual helpers
-    stormStrength: 0.28,
+    stormStrength: 0.1,
     danger: 0,                 // 0..1, driven by active threats
   };
 }

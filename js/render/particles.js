@@ -9,9 +9,9 @@ export class Particles {
     this.layers = [];
 
     // Distant veil, mid flakes, close flecks
-    this.layers.push(this._makeLayer(900, 70, 2.2, 0xf1f6fa, 0.55));
-    this.layers.push(this._makeLayer(600, 45, 1.6, 0xffffff, 0.75));
-    this.layers.push(this._makeLayer(420, 28, 1.0, 0xffffff, 0.95));
+    this.layers.push(this._makeLayer(220, 55, 1.4, 0xc8d4e0, 0.32));
+    this.layers.push(this._makeLayer(180, 32, 0.95, 0xe6edf4, 0.55));
+    this.layers.push(this._makeLayer(120, 18, 0.55, 0xffffff, 0.85));
     for (const l of this.layers) this.group.add(l.points);
 
     this.stormStrength = 0.4;

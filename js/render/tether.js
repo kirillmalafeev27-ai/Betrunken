@@ -10,12 +10,12 @@ export class Tether {
 
     // Static fixed rope (long cylinder segment series) drawn as a thin line
     // running the whole route.  We keep it a single geometry we translate.
-    const anchorGeo = new THREE.CylinderGeometry(0.035, 0.035, 340, 6);
+    const anchorGeo = new THREE.CylinderGeometry(0.04, 0.04, 340, 6);
     const anchorMat = new THREE.MeshStandardMaterial({
-      color: 0xdfe5ec,
-      roughness: 0.5,
-      emissive: 0x222,
-      emissiveIntensity: 0.15,
+      color: 0x2a1a10,
+      roughness: 0.85,
+      emissive: 0x000,
+      emissiveIntensity: 0,
     });
     this.fixedRope = new THREE.Mesh(anchorGeo, anchorMat);
     this.fixedRope.position.set(0, 150, -0.6); // runs up the center couloir
@@ -29,10 +29,9 @@ export class Tether {
       this.nodes.push({ x: 0, y: i * 0.9, z: 0.5, vx: 0, vy: 0, vz: 0 });
     }
     const segMat = new THREE.MeshStandardMaterial({
-      color: 0xe3d8b0,
-      roughness: 0.7,
-      emissive: 0x30281a,
-      emissiveIntensity: 0.2,
+      color: 0xc7a86a,
+      roughness: 0.85,
+      metalness: 0.0,
     });
     this.segMeshes = [];
     for (let i = 0; i < this.segments; i++) {

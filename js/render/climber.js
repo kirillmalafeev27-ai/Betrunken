@@ -102,6 +102,32 @@ export function makeClimber({ jacketColor = 0xd24136, packColor = 0x324156 } = {
   rightLeg.position.set(0.18, 0.3, 0);
   group.add(rightLeg);
 
+  // Stance ledge — small snowy wedge under the feet so the climber visually
+  // stands on something even though the mountain face doesn't carry per-step
+  // geometry.
+  const ledge = new THREE.Mesh(
+    new THREE.BoxGeometry(1.7, 0.22, 0.7),
+    new THREE.MeshStandardMaterial({
+      color: 0xd4dee9,
+      roughness: 1.0,
+      metalness: 0.0,
+      flatShading: true,
+    })
+  );
+  ledge.position.set(0, -0.18, -0.05);
+  ledge.receiveShadow = true;
+  group.add(ledge);
+  const ledgeFront = new THREE.Mesh(
+    new THREE.BoxGeometry(1.5, 0.12, 0.18),
+    new THREE.MeshStandardMaterial({
+      color: 0xb6c5d6,
+      roughness: 1.0,
+      flatShading: true,
+    })
+  );
+  ledgeFront.position.set(0, -0.24, 0.32);
+  group.add(ledgeFront);
+
   // Crampons (cones downward)
   const cramponMat = m(0x8a92a0, { metalness: 0.7, roughness: 0.3 });
   for (const lx of [-0.18, 0.18]) {
