@@ -360,7 +360,7 @@ camera.position.set(0, 1.55, 0);
 // two walls meeting in the background instead of a head-on flat wall.
 // The reticle moves with the mouse (pointer-style), exactly like the 2D sandbox.
 const BASE_PITCH = -0.06;
-const BASE_YAW   = -0.55;
+const BASE_YAW   =  0.55;
 camera.rotation.order = 'YXZ';
 camera.rotation.x = BASE_PITCH;
 camera.rotation.y = BASE_YAW;
@@ -811,9 +811,9 @@ async function boot() {
 // Trestle table + mug + apple (matches the reference image composition)
 // ---------------------------------------------------------------------------
 const TARGET_DIST = 3.0;             // distance in front of camera
-const TABLE_TOP_Y = 0.95;            // sawhorse plank height
+const TABLE_TOP_Y = 1.25;            // sawhorse plank height — chest height
 const MUG_BASE_Y  = TABLE_TOP_Y + 0.02;
-const MUG_HEIGHT  = 0.30;
+const MUG_HEIGHT  = 0.45;            // tall tankard so the apple ends up near eye level
 const APPLE_SIZE  = 0.12;            // small fruit perched on the mug
 const FOCUS_X     = -0.1;            // slight off-center, like the reference
 
