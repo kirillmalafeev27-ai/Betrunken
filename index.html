@@ -143,6 +143,43 @@
   #start .keys { display: flex; gap: 10px; justify-content: center; margin: 14px 0 20px; flex-wrap: wrap; }
   #start .key { font-size: 11px; color: var(--text); background: var(--panel-2); padding: 4px 10px; border-radius: 6px; border: 1px solid #3a3733; }
   #start .key b { color: var(--accent); }
+
+  /* Spawn editor — shown before the start screen so the player can place
+     apple-spawn points anywhere along the camera's view direction. */
+  #spawn-editor {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10,9,8,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 51;
+  }
+  #spawn-editor .panel {
+    background: var(--panel);
+    border: 1px solid rgba(200,144,96,0.2);
+    border-radius: 14px;
+    padding: 22px 26px;
+    width: 440px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.5);
+  }
+  #spawn-editor h2 { margin: 0 0 4px; color: var(--accent); font-size: 18px; letter-spacing: 1px; text-align: center; }
+  #spawn-editor p  { margin: 0 0 14px; color: var(--text-dim); font-size: 12px; text-align: center; line-height: 1.45; }
+  #spawn-editor .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; color: var(--text); }
+  #spawn-editor .row label { width: 100px; color: var(--text-dim); }
+  #spawn-editor .row input[type=range] { flex: 1; }
+  #spawn-editor .row .v { width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  #spawn-editor .list {
+    margin: 10px 0; max-height: 130px; overflow-y: auto;
+    background: var(--panel-2); border: 1px solid #3a3733; border-radius: 8px;
+    padding: 6px 8px; font-size: 12px; color: var(--text);
+  }
+  #spawn-editor .list .empty { color: var(--text-dim); font-style: italic; text-align: center; padding: 6px; }
+  #spawn-editor .list .item { display: flex; justify-content: space-between; padding: 3px 0; }
+  #spawn-editor .list .item button { background: none; border: none; color: #c0382b; font-size: 14px; cursor: pointer; padding: 0 6px; }
+  #spawn-editor .actions { display: flex; gap: 8px; margin-top: 10px; }
+  #spawn-editor button.primary { flex: 1; font-size: 13px; padding: 9px 14px; background: var(--accent); color: #1a1916; border: none; font-weight: 600; border-radius: 6px; cursor: pointer; }
+  #spawn-editor button.primary:hover { background: #d9a073; }
+  #spawn-editor button.secondary { font-size: 12px; padding: 9px 14px; background: var(--panel-2); color: var(--text); border: 1px solid #3a3733; border-radius: 6px; cursor: pointer; }
+  #spawn-editor button.secondary:hover { background: #3a3733; }
 </style>
 </head>
 <body>
@@ -190,6 +227,25 @@
   <div id="loading">
     <div class="ring"></div>
     <div class="label" id="loading-label">Загрузка ассетов…</div>
+  </div>
+
+  <div id="spawn-editor" style="display:none">
+    <div class="panel">
+      <h2>СПАВНЫ ЯБЛОК</h2>
+      <p>Расставь точки, в которых будет появляться яблоко. Игра выбирает случайную из списка. Если список пуст, используется дефолтный спавн.</p>
+      <div class="row"><label>Дальность</label><input id="se-dist" type="range" min="2"    max="14"  step="0.1"  value="8.0"><span class="v" id="se-dist-v">8.0</span></div>
+      <div class="row"><label>Высота</label>   <input id="se-y"    type="range" min="0.2"  max="3.5" step="0.05" value="2.45"><span class="v" id="se-y-v">2.45</span></div>
+      <div class="row"><label>Сдвиг вбок</label><input id="se-side" type="range" min="-3"   max="3"   step="0.05" value="-0.5"><span class="v" id="se-side-v">-0.50</span></div>
+      <div class="row"><label>Размер</label>   <input id="se-size" type="range" min="0.06" max="0.5" step="0.01" value="0.24"><span class="v" id="se-size-v">0.24</span></div>
+      <div class="actions" style="margin: 10px 0 6px;">
+        <button id="se-add" class="primary">Добавить точку</button>
+      </div>
+      <div class="list" id="se-list"></div>
+      <div class="actions">
+        <button id="se-clear" class="secondary">Очистить</button>
+        <button id="se-start" class="primary">Начать игру</button>
+      </div>
+    </div>
   </div>
 
   <div id="start" style="display:none">
@@ -473,6 +529,9 @@ const state = {
   appleAlive: true,
   bolts: [],         // active flying bolts
   fragments: [],     // apple fragments after a hit
+  spawns: [],        // user-defined spawn points: {x, y, z, size}
+  editorGhosts: [],  // ghost-apple objects rendered while the spawn editor is open
+  editorPreview: null, // ghost apple that follows the editor sliders
   apple: null,       // current apple Object3D
   appleHitbox: null, // sphere {center, radius}
   mug: null,
@@ -812,10 +871,11 @@ async function boot() {
   state.appleTemplate = appleGLB.scene;
   enableShadows(state.appleTemplate);
 
-  buildMugAndApple();
+  loadSpawnsFromStorage();
 
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('start').style.display = 'flex';
+  openSpawnEditor();
+
   document.getElementById('start-btn').addEventListener('click', () => {
     AudioFx.ensure();
     document.getElementById('start').style.display = 'none';
@@ -823,54 +883,199 @@ async function boot() {
 }
 
 // ---------------------------------------------------------------------------
-// Apple target (sat on top of the barrels at the back of the tavern)
+// Apple target — spawned from the user-defined spawn list. The defaults
+// below are used both as the editor's initial slider values and as the
+// fallback spawn when the user's spawn list is empty.
 // ---------------------------------------------------------------------------
-const TARGET_DIST = 8.0;             // horizontal distance to the barrels
-const APPLE_SIZE  = 0.24;            // doubled — easier to read at the barrel range
-const APPLE_Y     = 2.45;            // higher up against the barrel stack
-const FOCUS_X     = -0.5;            // sideways offset along camera right (negative = left)
+const DEFAULT_TARGET_DIST = 8.0;
+const DEFAULT_APPLE_SIZE  = 0.24;
+const DEFAULT_APPLE_Y     = 2.45;
+const DEFAULT_FOCUS_X     = -0.5;
+const SPAWNS_STORAGE_KEY  = 'betrunken.spawns.v1';
 
-let APPLE_POS;
-
-function buildMugAndApple() {
-  // Place the apple at the barrel stack at the back of the tavern, along
-  // the camera's baseline gaze direction (FORWARD vector). No furniture —
-  // the apple just rests where the barrels are.
-  const cx = camera.position.x;
-  const cz = camera.position.z;
-  const baseX = cx + FORWARD_X * TARGET_DIST + RIGHT_X * FOCUS_X;
-  const baseZ = cz + FORWARD_Z * TARGET_DIST + RIGHT_Z * FOCUS_X;
-  APPLE_POS = new THREE.Vector3(baseX, APPLE_Y, baseZ);
-
-  spawnApple();
+// Convert (distance, sideOffset, y) — the editor-facing axes — into a
+// world-space {x, y, z} relative to the camera's base gaze direction.
+function spawnFromAxes(distance, sideOffset, y) {
+  return {
+    x: CAMERA_BASE_POS.x + FORWARD_X * distance + RIGHT_X * sideOffset,
+    y: y,
+    z: CAMERA_BASE_POS.z + FORWARD_Z * distance + RIGHT_Z * sideOffset,
+  };
 }
 
-function spawnApple() {
+function defaultSpawn() {
+  const p = spawnFromAxes(DEFAULT_TARGET_DIST, DEFAULT_FOCUS_X, DEFAULT_APPLE_Y);
+  return { x: p.x, y: p.y, z: p.z, size: DEFAULT_APPLE_SIZE };
+}
+
+function pickSpawn() {
+  if (state.spawns.length === 0) return defaultSpawn();
+  return state.spawns[Math.floor(Math.random() * state.spawns.length)];
+}
+
+function makeAppleMesh(size, opts = {}) {
   const apple = state.appleTemplate.clone(true);
   apple.traverse(o => {
     if (o.isMesh) {
-      o.castShadow = true;
-      o.receiveShadow = true;
+      o.castShadow = !opts.ghost;
+      o.receiveShadow = !opts.ghost;
       o.material = o.material.clone();
+      if (opts.ghost) {
+        o.material.transparent = true;
+        o.material.opacity = 0.35;
+        o.material.depthWrite = false;
+      }
     }
   });
   const ab = computeBBox(apple);
-  const s = APPLE_SIZE / Math.max(ab.size.x, ab.size.y, ab.size.z);
-  apple.scale.setScalar(s);
-  // Recompute bbox after scaling so we can rest its bottom on the foam.
-  apple.position.copy(APPLE_POS);
+  apple.scale.setScalar(size / Math.max(ab.size.x, ab.size.y, ab.size.z));
+  return apple;
+}
+
+function spawnApple() {
+  const spec = pickSpawn();
+  const apple = makeAppleMesh(spec.size);
+  apple.position.set(spec.x, spec.y, spec.z);
   scene.add(apple);
   state.apple = apple;
   state.appleAlive = true;
-  state.appleHitbox = { center: apple.position.clone(), radius: APPLE_SIZE * 0.55 };
+  state.appleHitbox = { center: apple.position.clone(), radius: spec.size * 0.55 };
 }
 
 function respawnApple() {
   if (state.apple) { scene.remove(state.apple); state.apple = null; }
-  // Clear fragments
   for (const f of state.fragments) scene.remove(f.obj);
   state.fragments = [];
   spawnApple();
+}
+
+// ---------------------------------------------------------------------------
+// Spawn editor — runs before the start screen so the player can place apple
+// spawn points anywhere along the line of sight, save them to localStorage,
+// and then jump into the game.
+// ---------------------------------------------------------------------------
+function loadSpawnsFromStorage() {
+  try {
+    const raw = localStorage.getItem(SPAWNS_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      state.spawns = parsed.filter(s =>
+        typeof s.x === 'number' && typeof s.y === 'number' &&
+        typeof s.z === 'number' && typeof s.size === 'number'
+      );
+    }
+  } catch (_) { /* corrupt storage — ignore */ }
+}
+
+function saveSpawnsToStorage() {
+  try { localStorage.setItem(SPAWNS_STORAGE_KEY, JSON.stringify(state.spawns)); }
+  catch (_) { /* quota or private mode — ignore */ }
+}
+
+function renderEditorGhosts() {
+  for (const g of state.editorGhosts) scene.remove(g);
+  state.editorGhosts.length = 0;
+  for (const s of state.spawns) {
+    const g = makeAppleMesh(s.size, { ghost: true });
+    g.position.set(s.x, s.y, s.z);
+    scene.add(g);
+    state.editorGhosts.push(g);
+  }
+}
+
+function updateEditorPreview() {
+  const dist = parseFloat(document.getElementById('se-dist').value);
+  const y    = parseFloat(document.getElementById('se-y').value);
+  const side = parseFloat(document.getElementById('se-side').value);
+  const size = parseFloat(document.getElementById('se-size').value);
+  document.getElementById('se-dist-v').textContent = dist.toFixed(1);
+  document.getElementById('se-y-v').textContent    = y.toFixed(2);
+  document.getElementById('se-side-v').textContent = side.toFixed(2);
+  document.getElementById('se-size-v').textContent = size.toFixed(2);
+
+  if (state.editorPreview) { scene.remove(state.editorPreview); state.editorPreview = null; }
+  const preview = makeAppleMesh(size, { ghost: true });
+  preview.traverse(o => {
+    if (o.isMesh) {
+      o.material.opacity = 0.7;
+      o.material.emissive = new THREE.Color(0x442211);
+      o.material.emissiveIntensity = 0.6;
+    }
+  });
+  const p = spawnFromAxes(dist, side, y);
+  preview.position.set(p.x, p.y, p.z);
+  scene.add(preview);
+  state.editorPreview = preview;
+}
+
+function renderSpawnList() {
+  const list = document.getElementById('se-list');
+  if (state.spawns.length === 0) {
+    list.innerHTML = '<div class="empty">список пуст — будет использован дефолтный спавн</div>';
+    return;
+  }
+  list.innerHTML = '';
+  state.spawns.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+    row.innerHTML = `<span>#${i + 1} &nbsp; x:${s.x.toFixed(2)}  y:${s.y.toFixed(2)}  z:${s.z.toFixed(2)}  size:${s.size.toFixed(2)}</span>`;
+    const rm = document.createElement('button');
+    rm.textContent = '✕';
+    rm.title = 'Удалить';
+    rm.addEventListener('click', () => {
+      state.spawns.splice(i, 1);
+      saveSpawnsToStorage();
+      renderSpawnList();
+      renderEditorGhosts();
+    });
+    row.appendChild(rm);
+    list.appendChild(row);
+  });
+}
+
+function openSpawnEditor() {
+  document.getElementById('spawn-editor').style.display = 'flex';
+  renderSpawnList();
+  renderEditorGhosts();
+  updateEditorPreview();
+
+  // Wire sliders once. Re-wiring would stack listeners, so guard.
+  if (!openSpawnEditor._wired) {
+    openSpawnEditor._wired = true;
+    for (const id of ['se-dist', 'se-y', 'se-side', 'se-size']) {
+      document.getElementById(id).addEventListener('input', updateEditorPreview);
+    }
+    document.getElementById('se-add').addEventListener('click', () => {
+      const dist = parseFloat(document.getElementById('se-dist').value);
+      const y    = parseFloat(document.getElementById('se-y').value);
+      const side = parseFloat(document.getElementById('se-side').value);
+      const size = parseFloat(document.getElementById('se-size').value);
+      const p = spawnFromAxes(dist, side, y);
+      state.spawns.push({ x: p.x, y: p.y, z: p.z, size });
+      saveSpawnsToStorage();
+      renderSpawnList();
+      renderEditorGhosts();
+    });
+    document.getElementById('se-clear').addEventListener('click', () => {
+      state.spawns.length = 0;
+      saveSpawnsToStorage();
+      renderSpawnList();
+      renderEditorGhosts();
+    });
+    document.getElementById('se-start').addEventListener('click', () => {
+      closeSpawnEditor();
+      spawnApple();
+      document.getElementById('start').style.display = 'flex';
+    });
+  }
+}
+
+function closeSpawnEditor() {
+  document.getElementById('spawn-editor').style.display = 'none';
+  for (const g of state.editorGhosts) scene.remove(g);
+  state.editorGhosts.length = 0;
+  if (state.editorPreview) { scene.remove(state.editorPreview); state.editorPreview = null; }
 }
 
 // ---------------------------------------------------------------------------
