@@ -356,10 +356,22 @@ scene.fog = new THREE.Fog(0x1a1611, 12, 28);
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.position.set(0, 1.55, 0);
 // Camera is essentially static. A small base pitch puts the mug+apple near screen center.
+// BASE_YAW rotates the view toward a corner of the tavern so the player sees
+// two walls meeting in the background instead of a head-on flat wall.
 // The reticle moves with the mouse (pointer-style), exactly like the 2D sandbox.
 const BASE_PITCH = -0.06;
+const BASE_YAW   = -0.55;
 camera.rotation.order = 'YXZ';
 camera.rotation.x = BASE_PITCH;
+camera.rotation.y = BASE_YAW;
+
+// Forward and rightward unit vectors in the XZ plane that match BASE_YAW.
+// `forward` points away from the camera along its baseline gaze; `right` is
+// perpendicular to it (camera-space +X).
+const FORWARD_X = -Math.sin(BASE_YAW);
+const FORWARD_Z = -Math.cos(BASE_YAW);
+const RIGHT_X   =  Math.cos(BASE_YAW);
+const RIGHT_Z   = -Math.sin(BASE_YAW);
 
 // Lights — warm, low-poly tavern mood.
 scene.add(new THREE.AmbientLight(0x6a5840, 0.7));
@@ -385,10 +397,20 @@ window_light.shadow.camera.far = 20;
 scene.add(window_light);
 
 // Spotlight aimed at the mug+apple so the target is always clearly visible.
+// Positions are derived from BASE_YAW so the cone always lands on the table
+// regardless of which corner of the room we end up facing.
 const targetSpot = new THREE.SpotLight(0xfff1d0, 8.0, 8, Math.PI / 6, 0.5, 1.0);
-targetSpot.position.set(0, 3.2, -1.8);
+targetSpot.position.set(
+  camera.position.x + FORWARD_X * 1.8,
+  3.2,
+  camera.position.z + FORWARD_Z * 1.8
+);
 const targetSpotTarget = new THREE.Object3D();
-targetSpotTarget.position.set(0, 1.0, -3.0);
+targetSpotTarget.position.set(
+  camera.position.x + FORWARD_X * 3.0,
+  1.0,
+  camera.position.z + FORWARD_Z * 3.0
+);
 scene.add(targetSpot);
 scene.add(targetSpotTarget);
 targetSpot.target = targetSpotTarget;
@@ -792,7 +814,7 @@ const TARGET_DIST = 3.0;             // distance in front of camera
 const TABLE_TOP_Y = 0.95;            // sawhorse plank height
 const MUG_BASE_Y  = TABLE_TOP_Y + 0.02;
 const MUG_HEIGHT  = 0.30;
-const APPLE_SIZE  = 0.22;            // larger so it's clearly visible
+const APPLE_SIZE  = 0.12;            // small fruit perched on the mug
 const FOCUS_X     = -0.1;            // slight off-center, like the reference
 
 function buildSawhorse() {
@@ -853,13 +875,22 @@ let MUG_POS;
 let APPLE_POS;
 
 function buildMugAndApple() {
-  // Anchor the whole composition relative to the camera's forward.
-  SAWHORSE_POS = new THREE.Vector3(FOCUS_X, 0, -TARGET_DIST);
-  MUG_POS      = new THREE.Vector3(FOCUS_X, MUG_BASE_Y, -TARGET_DIST);
-  APPLE_POS    = new THREE.Vector3(FOCUS_X, MUG_BASE_Y + MUG_HEIGHT + APPLE_SIZE * 0.42, -TARGET_DIST);
+  // Anchor the whole composition relative to the camera's baseline gaze
+  // (BASE_YAW), so when we rotate the view toward a corner the target stays
+  // dead-ahead. FOCUS_X is applied along the camera's right vector.
+  const cx = camera.position.x;
+  const cz = camera.position.z;
+  const baseX = cx + FORWARD_X * TARGET_DIST + RIGHT_X * FOCUS_X;
+  const baseZ = cz + FORWARD_Z * TARGET_DIST + RIGHT_Z * FOCUS_X;
+  SAWHORSE_POS = new THREE.Vector3(baseX, 0, baseZ);
+  MUG_POS      = new THREE.Vector3(baseX, MUG_BASE_Y, baseZ);
+  // Rest the apple on top of the foam — its bottom touches MUG top, so the
+  // center is exactly APPLE_SIZE / 2 above it.
+  APPLE_POS    = new THREE.Vector3(baseX, MUG_BASE_Y + MUG_HEIGHT + APPLE_SIZE * 0.5, baseZ);
 
   const trestle = buildSawhorse();
   trestle.position.copy(SAWHORSE_POS);
+  trestle.rotation.y = BASE_YAW;
   scene.add(trestle);
 
   const mug = buildMug();
@@ -1132,7 +1163,7 @@ function tick() {
   state.recoilOffset += state.recoilVel * dt;
 
   // Compose final camera orientation.
-  camera.rotation.y = state.aimSmooth.x + state.cameraSway.x;
+  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x;
   camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10;
 
   // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
