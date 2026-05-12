@@ -421,9 +421,9 @@ targetSpot.position.set(
 );
 const targetSpotTarget = new THREE.Object3D();
 targetSpotTarget.position.set(
-  camera.position.x + FORWARD_X * 8.0,
+  camera.position.x + FORWARD_X * 8.0 + RIGHT_X * -0.5,
   2.45,
-  camera.position.z + FORWARD_Z * 8.0
+  camera.position.z + FORWARD_Z * 8.0 + RIGHT_Z * -0.5
 );
 scene.add(targetSpot);
 scene.add(targetSpotTarget);
@@ -828,7 +828,7 @@ async function boot() {
 const TARGET_DIST = 8.0;             // horizontal distance to the barrels
 const APPLE_SIZE  = 0.24;            // doubled — easier to read at the barrel range
 const APPLE_Y     = 2.45;            // higher up against the barrel stack
-const FOCUS_X     = 0;
+const FOCUS_X     = -0.5;            // sideways offset along camera right (negative = left)
 
 let APPLE_POS;
 
