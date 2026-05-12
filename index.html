@@ -527,14 +527,12 @@ function computeBBox(obj) {
 const state = {
   shots: 0,
   hits: 0,
-  appleAlive: true,
   bolts: [],         // active flying bolts
   fragments: [],     // apple fragments after a hit
   spawns: [],        // user-defined spawn points: {x, y, z, size}
   editorGhosts: [],  // ghost-apple objects rendered while the spawn editor is open
   editorPreview: null, // ghost apple that follows the editor sliders
-  apple: null,       // current apple Object3D
-  appleHitbox: null, // sphere {center, radius}
+  apples: [],        // live apples on the field: [{ obj, hitbox: {center, radius} }]
   mug: null,
   crossbow: null,
   crossbowMixer: null,
@@ -906,14 +904,17 @@ function spawnFromAxes(distance, sideOffset, y) {
   };
 }
 
-function defaultSpawn() {
-  const p = spawnFromAxes(DEFAULT_TARGET_DIST, DEFAULT_FOCUS_X, DEFAULT_APPLE_Y);
-  return { x: p.x, y: p.y, z: p.z, size: DEFAULT_APPLE_SIZE };
-}
+// Built-in spawn set used when the player hasn't saved any of their own.
+// Hand-picked positions across the barrel stack so three apples appear at
+// once at game start.
+const DEFAULT_SPAWNS = [
+  { x: -4.61, y: 3.15, z: -2.45, size: 0.23 },
+  { x: -0.16, y: 3.25, z: -6.00, size: 0.21 },
+  { x: -0.48, y: 1.55, z: -3.93, size: 0.09 },
+];
 
-function pickSpawn() {
-  if (state.spawns.length === 0) return defaultSpawn();
-  return state.spawns[Math.floor(Math.random() * state.spawns.length)];
+function activeSpawns() {
+  return state.spawns.length > 0 ? state.spawns : DEFAULT_SPAWNS;
 }
 
 function makeAppleMesh(size, opts = {}) {
@@ -936,17 +937,23 @@ function makeAppleMesh(size, opts = {}) {
 }
 
 function spawnApple() {
-  const spec = pickSpawn();
-  const apple = makeAppleMesh(spec.size);
-  apple.position.set(spec.x, spec.y, spec.z);
-  scene.add(apple);
-  state.apple = apple;
-  state.appleAlive = true;
-  state.appleHitbox = { center: apple.position.clone(), radius: spec.size * 0.55 };
+  // Spawn ALL configured points at once so multiple apples can be airborne
+  // simultaneously. Each entry of `state.apples` keeps the mesh and the
+  // collision sphere it was constructed from.
+  for (const spec of activeSpawns()) {
+    const apple = makeAppleMesh(spec.size);
+    apple.position.set(spec.x, spec.y, spec.z);
+    scene.add(apple);
+    state.apples.push({
+      obj: apple,
+      hitbox: { center: apple.position.clone(), radius: spec.size * 0.55 },
+    });
+  }
 }
 
 function respawnApple() {
-  if (state.apple) { scene.remove(state.apple); state.apple = null; }
+  for (const a of state.apples) scene.remove(a.obj);
+  state.apples.length = 0;
   for (const f of state.fragments) scene.remove(f.obj);
   state.fragments = [];
   spawnApple();
@@ -1149,10 +1156,17 @@ function tryShoot() {
   // ray to the apple, or a sensible default if there's no apple) so the
   // bolt passes exactly through the reticle at the target.
   const aimDir = getAimRayDir();
+  // Converge the trajectory at whichever live apple is closest to the camera
+  // ray — that one is presumably what the player is aiming at. Falls back to
+  // a sane default distance when there are no apples.
   let convergeDist = 5.0;
-  if (state.appleHitbox) {
-    const toApple = state.appleHitbox.center.clone().sub(camera.position);
-    convergeDist = Math.max(1.5, toApple.dot(aimDir));
+  let bestErrSq = Infinity;
+  for (const a of state.apples) {
+    const toApple = a.hitbox.center.clone().sub(camera.position);
+    const along = toApple.dot(aimDir);
+    if (along < 1.0) continue;
+    const perpSq = toApple.lengthSq() - along * along;
+    if (perpSq < bestErrSq) { bestErrSq = perpSq; convergeDist = along; }
   }
   const aimPoint = camera.position.clone().add(aimDir.clone().multiplyScalar(convergeDist));
   const dir = aimPoint.clone().sub(startPos).normalize();
@@ -1161,20 +1175,25 @@ function tryShoot() {
   state.shots++;
   updateStats();
 
-  // Hit test: ray vs apple sphere.
+  // Hit test: ray vs every live apple sphere. Pick the nearest hit so the
+  // bolt resolves on the closest apple along its path.
   let willHit = false;
   let hitPoint = null;
-  if (state.appleAlive && state.appleHitbox) {
-    const oc = startPos.clone().sub(state.appleHitbox.center);
+  let hitAppleIdx = -1;
+  let bestT = Infinity;
+  for (let i = 0; i < state.apples.length; i++) {
+    const hb = state.apples[i].hitbox;
+    const oc = startPos.clone().sub(hb.center);
     const b = oc.dot(dir);
-    const c = oc.dot(oc) - state.appleHitbox.radius * state.appleHitbox.radius;
+    const c = oc.dot(oc) - hb.radius * hb.radius;
     const disc = b * b - c;
-    if (disc >= 0) {
-      const t = -b - Math.sqrt(disc);
-      if (t > 0) {
-        willHit = true;
-        hitPoint = startPos.clone().add(dir.clone().multiplyScalar(t));
-      }
+    if (disc < 0) continue;
+    const t = -b - Math.sqrt(disc);
+    if (t > 0 && t < bestT) {
+      bestT = t;
+      hitAppleIdx = i;
+      hitPoint = startPos.clone().add(dir.clone().multiplyScalar(t));
+      willHit = true;
     }
   }
 
@@ -1186,6 +1205,7 @@ function tryShoot() {
     life: 3.0,
     willHit,
     hitPoint,
+    hitAppleIdx,
     resolved: false,
   });
 }
@@ -1202,12 +1222,14 @@ function getAimRayDir() {
 // ---------------------------------------------------------------------------
 // Apple shatter
 // ---------------------------------------------------------------------------
-function shatterApple(impactPoint, impactDir) {
-  if (!state.apple) return;
-  const origin = state.apple.position.clone();
+function shatterApple(idx, impactPoint, impactDir) {
+  const entry = state.apples[idx];
+  if (!entry) return;
+  const apple = entry.obj;
+  const origin = apple.position.clone();
   // Collect base meshes from the apple
   const meshes = [];
-  state.apple.traverse(o => { if (o.isMesh) meshes.push(o); });
+  apple.traverse(o => { if (o.isMesh) meshes.push(o); });
 
   const NUM = 26;
   for (let i = 0; i < NUM; i++) {
@@ -1266,9 +1288,14 @@ function shatterApple(impactPoint, impactDir) {
     state.fragments.push({ obj: drop, vel: v, ang: new THREE.Vector3(), life: 1.6 });
   }
 
-  scene.remove(state.apple);
-  state.apple = null;
-  state.appleAlive = false;
+  scene.remove(apple);
+  state.apples.splice(idx, 1);
+  // Any in-flight bolts that were aimed at apples after this one need their
+  // index decremented so they still resolve onto the right target.
+  for (const b of state.bolts) {
+    if (b.hitAppleIdx > idx) b.hitAppleIdx--;
+    else if (b.hitAppleIdx === idx) b.hitAppleIdx = -1; // target already gone
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1368,10 +1395,12 @@ function tick() {
       if (before <= 0 && after >= 0) {
         b.resolved = true;
         b.obj.position.copy(b.hitPoint);
-        if (state.appleAlive) {
+        // Only fire the hit if the targeted apple is still alive — it may
+        // have been shattered by an earlier in-flight bolt.
+        if (b.hitAppleIdx >= 0 && b.hitAppleIdx < state.apples.length) {
           state.hits++; updateStats();
           AudioFx.hit();
-          shatterApple(b.hitPoint, b.dir);
+          shatterApple(b.hitAppleIdx, b.hitPoint, b.dir);
         }
         // Remove bolt shortly after impact.
         b.life = 0.05;
@@ -1421,17 +1450,21 @@ function tick() {
     return true;
   });
 
-  // Crosshair color: green if the reticle ray actually hits the apple.
+  // Crosshair color: green if the reticle ray actually hits any live apple.
   const ch = document.getElementById('crosshair');
-  if (state.appleAlive && state.appleHitbox) {
+  if (state.apples.length > 0) {
     const startPos = new THREE.Vector3();
     camera.getWorldPosition(startPos);
     const dir = getAimRayDir();
-    const oc = startPos.clone().sub(state.appleHitbox.center);
-    const bd = oc.dot(dir);
-    const c = oc.dot(oc) - state.appleHitbox.radius * state.appleHitbox.radius;
-    const disc = bd * bd - c;
-    if (disc >= 0 && -bd - Math.sqrt(disc) > 0) ch.classList.add('on');
+    let any = false;
+    for (const a of state.apples) {
+      const oc = startPos.clone().sub(a.hitbox.center);
+      const bd = oc.dot(dir);
+      const c = oc.dot(oc) - a.hitbox.radius * a.hitbox.radius;
+      const disc = bd * bd - c;
+      if (disc >= 0 && -bd - Math.sqrt(disc) > 0) { any = true; break; }
+    }
+    if (any) ch.classList.add('on');
     else ch.classList.remove('on');
   } else {
     ch.classList.remove('on');
