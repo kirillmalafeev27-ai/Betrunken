@@ -353,28 +353,40 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1611);
 scene.fog = new THREE.Fog(0x1a1611, 12, 28);
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
-camera.position.set(0, 1.55, 0);
-// Anchor for the drunken positional sway: each frame the camera is offset
-// from this base by low-frequency noise scaled by state.cameraDrift.
-const CAMERA_BASE_POS = camera.position.clone();
 // Camera is essentially static. A small base pitch puts the mug+apple near screen center.
 // BASE_YAW rotates the view toward a corner of the tavern so the player sees
 // two walls meeting in the background instead of a head-on flat wall.
 // The reticle moves with the mouse (pointer-style), exactly like the 2D sandbox.
 const BASE_PITCH = -0.06;
 const BASE_YAW   =  0.55;
-camera.rotation.order = 'YXZ';
-camera.rotation.x = BASE_PITCH;
-camera.rotation.y = BASE_YAW;
 
 // Forward and rightward unit vectors in the XZ plane that match BASE_YAW.
 // `forward` points away from the camera along its baseline gaze; `right` is
-// perpendicular to it (camera-space +X).
+// perpendicular to it (camera-space +X). All target/light placement is
+// expressed in terms of these so we can move the camera anywhere and the
+// composition stays aligned with the line of sight.
 const FORWARD_X = -Math.sin(BASE_YAW);
 const FORWARD_Z = -Math.cos(BASE_YAW);
 const RIGHT_X   =  Math.cos(BASE_YAW);
 const RIGHT_Z   = -Math.sin(BASE_YAW);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
+// Stand the player a couple of metres back from the original spawn and at
+// roughly head-of-a-tall-man height, so the table+apple sit comfortably in
+// front and the corner of the tavern is visible behind them.
+const CAMERA_HEIGHT = 1.85;
+const CAMERA_BACK   = 1.8;
+camera.position.set(
+  -FORWARD_X * CAMERA_BACK,
+   CAMERA_HEIGHT,
+  -FORWARD_Z * CAMERA_BACK
+);
+// Anchor for the drunken positional sway: each frame the camera is offset
+// from this base by low-frequency noise scaled by state.cameraDrift.
+const CAMERA_BASE_POS = camera.position.clone();
+camera.rotation.order = 'YXZ';
+camera.rotation.x = BASE_PITCH;
+camera.rotation.y = BASE_YAW;
 
 // Lights — warm, low-poly tavern mood.
 scene.add(new THREE.AmbientLight(0x6a5840, 0.7));
