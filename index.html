@@ -444,8 +444,7 @@ const state = {
   crossbowMixer: null,
   crossbowAction: null,
   boltTemplate: null, // a clone-able bolt mesh extracted from the crossbow
-  idleBolts: [],      // bolt meshes attached to the crossbow, shown while loaded
-  idleBoltAnchor: null, // representative idle bolt used to compute muzzle origin
+  idleBolt: null,     // bolt mounted on the crossbow rail while loaded
   drunk: 1.0,
   damp: 3.5,
   cameraDrift: 0.7,
@@ -671,12 +670,9 @@ async function boot() {
     if (candidate) boltCandidates.push(candidate);
   }
 
-  // Keep the pre-attached bolt(s) visible while the crossbow is loaded. They get
-  // hidden in tryShoot() and restored ~1s later (reload cycle). `candidate` is
-  // still used as the template for the flying projectile clone.
-  state.idleBolts = boltCandidates.slice();
-  state.idleBoltAnchor = candidate || null;
-  for (const b of boltCandidates) b.visible = true;
+  // Hide every pre-attached bolt in the model — we'll mount our own clean
+  // copy on the crossbow rail below, so we control its position exactly.
+  for (const b of boltCandidates) b.visible = false;
 
   // Identify the bowstring so we can freeze it in its rest pose every frame.
   // The animation in this asset launches the string forward along with the bolt,
@@ -750,6 +746,17 @@ async function boot() {
   const outerBoltGroup = new THREE.Group();
   outerBoltGroup.add(innerBoltGroup);
   state.boltTemplate = outerBoltGroup;
+
+  // Mount a single idle bolt on the crossbow itself, lying along the middle
+  // of the rail. crossbowAligned's local origin sits at the crossbow's bbox
+  // center with -Z pointing forward along the rail, so position (0, dy, 0)
+  // places the bolt right on the centerline. `dy` lifts it off the stock so
+  // it visually rests on top of the rail rather than clipping through it.
+  const idleBolt = state.boltTemplate.clone(true);
+  idleBolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
+  idleBolt.position.set(0, 0.045, 0);
+  crossbowAligned.add(idleBolt);
+  state.idleBolt = idleBolt;
 
   loadingLabel.textContent = 'Загрузка яблока…';
   const appleGLB = await loadGLB('Shark apple.glb');
@@ -896,10 +903,10 @@ function tryShoot() {
 
   // Hide the bolt that sits on the crossbow rail, then restore it ~1s later so
   // the weapon visibly "reloads".
-  if (state.idleBolts && state.idleBolts.length) {
-    for (const b of state.idleBolts) b.visible = false;
+  if (state.idleBolt) {
+    state.idleBolt.visible = false;
     setTimeout(() => {
-      for (const b of state.idleBolts) b.visible = true;
+      if (state.idleBolt) state.idleBolt.visible = true;
     }, 1000);
   }
 
@@ -926,15 +933,13 @@ function tryShoot() {
   bolt.add(streak);
   scene.add(bolt);
 
-  // Start position: world-space center of the bolt that sits on the crossbow
-  // rail, so the projectile visually emerges from the middle of the weapon.
-  // Fallback to a hand-tuned offset if no idle bolt was found.
+  // Start position: world-space center of the idle bolt sitting on the
+  // crossbow rail, so the projectile visually emerges from the middle of
+  // the weapon. Fallback to a hand-tuned offset if no idle bolt exists.
   let startPos;
-  if (state.idleBoltAnchor) {
-    state.idleBoltAnchor.updateWorldMatrix(true, false);
-    const bb = new THREE.Box3().setFromObject(state.idleBoltAnchor);
-    startPos = new THREE.Vector3();
-    bb.getCenter(startPos);
+  if (state.idleBolt) {
+    state.idleBolt.updateWorldMatrix(true, false);
+    startPos = new THREE.Vector3().setFromMatrixPosition(state.idleBolt.matrixWorld);
   } else {
     const muzzleLocal = new THREE.Vector3(0.02, -0.08, -0.85);
     startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
