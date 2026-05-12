@@ -349,21 +349,23 @@ scene.background = new THREE.Color(0x1a1611);
 scene.fog = new THREE.Fog(0x1a1611, 12, 28);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
-camera.position.set(0, 1.55, 2.4);
+camera.position.set(0, 1.55, 0);
+// Base pitch keeps the apple roughly at screen center at neutral aim.
+const BASE_PITCH = -0.06;
 
 // Lights — warm, low-poly tavern mood.
-scene.add(new THREE.AmbientLight(0x5a4a38, 0.55));
-const hemi = new THREE.HemisphereLight(0xffd9a8, 0x2a1f15, 0.6);
+scene.add(new THREE.AmbientLight(0x6a5840, 0.7));
+const hemi = new THREE.HemisphereLight(0xffd9a8, 0x2a1f15, 0.75);
 scene.add(hemi);
 
-const fire = new THREE.PointLight(0xffa040, 4.2, 12, 1.8);
-fire.position.set(-2.6, 1.2, 1.5);
+const fire = new THREE.PointLight(0xffa040, 4.2, 14, 1.8);
+fire.position.set(-3.0, 1.2, -1.5);
 fire.castShadow = true;
 fire.shadow.mapSize.set(512, 512);
 scene.add(fire);
 
-const window_light = new THREE.DirectionalLight(0xffe1b3, 1.2);
-window_light.position.set(3, 4, -2);
+const window_light = new THREE.DirectionalLight(0xffe1b3, 1.3);
+window_light.position.set(3, 5, -2);
 window_light.castShadow = true;
 window_light.shadow.mapSize.set(1024, 1024);
 window_light.shadow.camera.left = -6;
@@ -374,9 +376,14 @@ window_light.shadow.camera.near = 0.1;
 window_light.shadow.camera.far = 20;
 scene.add(window_light);
 
-const aimLight = new THREE.PointLight(0xffe6c0, 1.0, 6, 1.5);
-aimLight.position.set(0, 1.8, 0.5);
-scene.add(aimLight);
+// Spotlight aimed at the mug+apple so the target is always clearly visible.
+const targetSpot = new THREE.SpotLight(0xfff1d0, 8.0, 8, Math.PI / 6, 0.5, 1.0);
+targetSpot.position.set(0, 3.2, -1.8);
+const targetSpotTarget = new THREE.Object3D();
+targetSpotTarget.position.set(0, 1.0, -3.0);
+scene.add(targetSpot);
+scene.add(targetSpotTarget);
+targetSpot.target = targetSpotTarget;
 
 // ---------------------------------------------------------------------------
 // Asset loading
@@ -494,50 +501,129 @@ window.addEventListener('resize', () => {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+// Build a rotation that maps local axes onto desired world axes.
+// `fromLocal` is which local axis (+x/-x/+y/-y/+z/-z) should become which world axis.
+function axisVec(name) {
+  switch (name) {
+    case '+x': return new THREE.Vector3(1, 0, 0);
+    case '-x': return new THREE.Vector3(-1, 0, 0);
+    case '+y': return new THREE.Vector3(0, 1, 0);
+    case '-y': return new THREE.Vector3(0, -1, 0);
+    case '+z': return new THREE.Vector3(0, 0, 1);
+    case '-z': return new THREE.Vector3(0, 0, -1);
+  }
+}
+// Rotate so local axis `forwardLocal` points to world -Z, local axis `upLocal` points to world +Y.
+function alignmentQuat(forwardLocal, upLocal) {
+  const fL = axisVec(forwardLocal);
+  const uL = axisVec(upLocal);
+  // Build a basis matrix whose columns are images of local x,y,z under the rotation we want.
+  // We have constraints: R * fL = (0,0,-1), R * uL = (0,1,0).
+  // Equivalently R^T has columns fL, uL, sL where sL = uL × fL? Let me just construct by inverse.
+  // Build matrix M with columns = (fL, uL, fL×uL) — that's the local-frame "forward, up, side" basis.
+  const sL = new THREE.Vector3().crossVectors(uL, fL);  // right-handed: side = up × forward (for -Z forward)
+  // Wait. In world we want forward = -Z, up = +Y. Then side = up × forward = (0,1,0) × (0,0,-1) = (1,0,0) = +X. Good.
+  // So local frame: forwardLocal corresponds to world -Z, upLocal to world +Y, sL to world +X.
+  // The matrix that maps local → world: world_x_col = sL, world_y_col = uL, world_z_col = -fL.
+  // i.e. R has columns (sL, uL, -fL) when expressed... actually rows of R^T are local-frame basis in world coords.
+  // To get the rotation matrix R that takes a local vector to its world coord, we set:
+  //   R = [ sL_w  uL_w  -fL_w ]   (as columns), where sL_w, uL_w, -fL_w are unit world basis vectors.
+  // Wait this is getting muddled. Let me just construct via Matrix4.makeBasis.
+  const m = new THREE.Matrix4();
+  // makeBasis sets the rotation columns to xAxis, yAxis, zAxis.
+  // So columns of R = (xAxis, yAxis, zAxis) in world frame, but R is rotation that maps local→world only if these are the IMAGES of local e_x, e_y, e_z under R.
+  // We want R^-1: takes world → local. Hmm.
+  // OK simpler approach: build the inverse mapping. R^-1 takes local → ?, ugh.
+  // Let me think physically: We have an object whose intrinsic "forward" direction is fL (in its local coords).
+  // After rotation R, that forward direction in world is R*fL. We want R*fL = -Z_world.
+  // Similarly R*uL = +Y_world.
+  // R^T * (-Z_world) = fL. R^T * (+Y_world) = uL. So columns of R^T are fL, uL, sL = ?
+  // R^T column k = R^T * e_k. We have R^T * (1,0,0) = ?, R^T * (0,1,0) = uL, R^T * (0,0,-1) = fL → R^T * (0,0,1) = -fL.
+  // So R^T = [ ? | uL | -fL ] columns. The first column must be unit vector perpendicular to uL and -fL with positive orientation. That's uL × (-fL) = -uL × fL.
+  // For our example: uL=Y, fL=-Z → uL × fL = Y × (-Z) = -X → -uL × fL = +X. So first column = +X. Identity. Good.
+  m.makeBasis(
+    new THREE.Vector3().crossVectors(uL, fL).multiplyScalar(-1).normalize(),  // -uL × fL
+    uL.clone(),
+    fL.clone().multiplyScalar(-1)
+  );
+  // m is R^T. We want R = m^T.
+  m.transpose();
+  const q = new THREE.Quaternion().setFromRotationMatrix(m);
+  return q;
+}
+
+// Auto-orient an asset by its bbox: longest axis becomes forward (-Z), smallest becomes up (+Y).
+function autoOrient(obj) {
+  // Center the object first.
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  obj.position.sub(center);
+
+  const axes = [
+    { name: '+x', len: size.x },
+    { name: '+y', len: size.y },
+    { name: '+z', len: size.z },
+  ];
+  axes.sort((a, b) => b.len - a.len);
+  const forwardLocal = axes[0].name;  // longest = forward
+  const upLocal = axes[2].name;       // smallest = up (vertical thickness)
+  const wrap = new THREE.Group();
+  wrap.add(obj);
+  wrap.quaternion.copy(alignmentQuat(forwardLocal, upLocal));
+  return { wrap, size, sorted: axes };
+}
+
 async function boot() {
   loadingLabel.textContent = 'Загрузка таверны…';
   const tavernGLB = await loadGLB('low-poly_medieval_tavern.glb');
   const tavern = tavernGLB.scene;
   enableShadows(tavern);
-  // Fit the tavern interior roughly around origin.
   const { size, center } = computeBBox(tavern);
-  const scale = 8 / Math.max(size.x, size.z);
+  const scale = 12 / Math.max(size.x, size.z);
   tavern.scale.setScalar(scale);
   tavern.position.x -= center.x * scale;
   tavern.position.z -= center.z * scale;
   tavern.position.y -= (center.y - size.y / 2) * scale;
+  // Push the tavern away so we look INTO it (down -Z).
+  tavern.position.z -= 3.5;
   scene.add(tavern);
 
   loadingLabel.textContent = 'Загрузка арбалета…';
   const crossbowGLB = await loadGLB('medieval_crossbow_with_bolt.glb');
-  const crossbow = crossbowGLB.scene;
-  enableShadows(crossbow);
-  // First-person placement: attach to camera.
-  const cb = computeBBox(crossbow);
+  const crossbowRaw = crossbowGLB.scene;
+  enableShadows(crossbowRaw);
+
+  // Scale crossbow to a sensible first-person size.
+  const cb = computeBBox(crossbowRaw);
   const cbScale = 0.55 / Math.max(cb.size.x, cb.size.y, cb.size.z);
-  crossbow.scale.setScalar(cbScale);
-  // Re-center, then offset into bottom-right of the FOV.
-  crossbow.position.sub(cb.center.clone().multiplyScalar(cbScale));
+  crossbowRaw.scale.setScalar(cbScale);
+
+  // Auto-orient by bbox: longest axis (the stock/rail) → forward (-Z), thinnest → up.
+  const oriented = autoOrient(crossbowRaw);
+  const crossbowAligned = oriented.wrap;
+
+  // First-person rig — slight offset to the right + down, very slight cant.
   const crossbowRig = new THREE.Group();
-  crossbowRig.add(crossbow);
-  crossbowRig.position.set(0.18, -0.22, -0.55);
-  crossbowRig.rotation.set(-0.05, -0.15, 0);
+  crossbowRig.add(crossbowAligned);
+  crossbowRig.position.set(0.10, -0.18, -0.55);
+  crossbowRig.rotation.set(-0.02, 0.0, 0);
   camera.add(crossbowRig);
   scene.add(camera);
   state.crossbow = crossbowRig;
-  state.crossbowInner = crossbow;
+  state.crossbowInner = crossbowRaw;
 
-  // Animation mixer
+  // Animation mixer for the built-in crossbow firing animation.
   if (crossbowGLB.animations && crossbowGLB.animations.length) {
-    state.crossbowMixer = new THREE.AnimationMixer(crossbow);
+    state.crossbowMixer = new THREE.AnimationMixer(crossbowRaw);
     state.crossbowAction = state.crossbowMixer.clipAction(crossbowGLB.animations[0]);
     state.crossbowAction.setLoop(THREE.LoopOnce, 1);
     state.crossbowAction.clampWhenFinished = true;
   }
 
-  // Try to find a bolt mesh inside the crossbow to clone as the projectile.
+  // Extract bolt mesh from the crossbow to use as projectile.
   let candidate = null;
-  crossbow.traverse(o => {
+  crossbowRaw.traverse(o => {
     if (!o.isMesh) return;
     const n = (o.name || '').toLowerCase();
     if (n.includes('bolt') || n.includes('arrow') || n.includes('quarrel')) {
@@ -545,9 +631,8 @@ async function boot() {
     }
   });
   if (!candidate) {
-    // Fall back: pick the longest, thinnest mesh in the model.
     let best = null, bestRatio = 0;
-    crossbow.traverse(o => {
+    crossbowRaw.traverse(o => {
       if (!o.isMesh) return;
       const b = new THREE.Box3().setFromObject(o);
       const s = new THREE.Vector3(); b.getSize(s);
@@ -558,58 +643,65 @@ async function boot() {
     });
     candidate = best;
   }
+
+  // Build the bolt template as TWO nested groups so lookAt at fire time doesn't
+  // erase our pre-rotation that aligns the bolt's long axis with -Z.
+  let innerBoltGroup;
   if (candidate) {
     const bolt = candidate.clone(true);
     bolt.traverse(o => { if (o.isMesh) { o.castShadow = true; o.material = o.material.clone(); } });
-    // Normalize size — we want a bolt about 0.6m long.
+    // Reset any local transform so bbox reflects pure geometry orientation.
+    bolt.position.set(0, 0, 0);
+    bolt.rotation.set(0, 0, 0);
+    bolt.scale.set(1, 1, 1);
     const bb = new THREE.Box3().setFromObject(bolt);
     const bs = new THREE.Vector3(); bb.getSize(bs);
     const longest = Math.max(bs.x, bs.y, bs.z);
-    const targetLen = 0.6;
-    const bScale = targetLen / longest;
-    bolt.scale.setScalar(bScale);
-    // Center on origin and align longest axis to +Z (we'll rotate later if needed).
-    bb.setFromObject(bolt);
-    const bc = new THREE.Vector3(); bb.getCenter(bc);
+    const targetLen = 0.55;
+    bolt.scale.setScalar(targetLen / longest);
+    // Re-center after scaling.
+    const bb2 = new THREE.Box3().setFromObject(bolt);
+    const bc = new THREE.Vector3(); bb2.getCenter(bc);
     bolt.position.sub(bc);
-    // Determine axis along which the bolt is longest, rotate to +Z.
-    bb.setFromObject(bolt);
-    bb.getSize(bs);
-    const wrap = new THREE.Group();
-    wrap.add(bolt);
-    // Make the bolt's longest axis align with -Z (which is the forward axis after lookAt).
-    if (bs.x >= bs.y && bs.x >= bs.z) wrap.rotation.y = Math.PI / 2;
-    else if (bs.y >= bs.x && bs.y >= bs.z) wrap.rotation.x = -Math.PI / 2;
-    state.boltTemplate = wrap;
+    // Pre-rotate so its longest axis aligns with -Z.
+    innerBoltGroup = new THREE.Group();
+    innerBoltGroup.add(bolt);
+    if (bs.x >= bs.y && bs.x >= bs.z) innerBoltGroup.rotation.y = Math.PI / 2;
+    else if (bs.y >= bs.x && bs.y >= bs.z) innerBoltGroup.rotation.x = -Math.PI / 2;
   } else {
-    // Fallback: build a basic bolt.
-    const g = new THREE.Group();
+    // Procedural fallback.
+    innerBoltGroup = new THREE.Group();
     const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.012, 0.012, 0.55, 8),
-      new THREE.MeshStandardMaterial({ color: 0x8a6a44 })
+      new THREE.CylinderGeometry(0.012, 0.012, 0.55, 10),
+      new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.85 })
     );
     shaft.rotation.x = Math.PI / 2;
     const tip = new THREE.Mesh(
-      new THREE.ConeGeometry(0.022, 0.08, 8),
-      new THREE.MeshStandardMaterial({ color: 0x8a8a8a, metalness: 0.7, roughness: 0.3 })
+      new THREE.ConeGeometry(0.022, 0.08, 10),
+      new THREE.MeshStandardMaterial({ color: 0xc0c0c0, metalness: 0.6, roughness: 0.35 })
     );
     tip.rotation.x = -Math.PI / 2;
     tip.position.z = -0.31;
     const fletch = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.001, 0.12),
+      new THREE.BoxGeometry(0.07, 0.0015, 0.12),
       new THREE.MeshStandardMaterial({ color: 0xc0392b })
     );
     fletch.position.z = 0.22;
-    g.add(shaft, tip, fletch);
-    state.boltTemplate = g;
+    const fletch2 = fletch.clone();
+    fletch2.rotation.z = Math.PI / 2;
+    innerBoltGroup.add(shaft, tip, fletch, fletch2);
   }
+  innerBoltGroup.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  // Outer group — this is the one lookAt() will rotate at fire time.
+  const outerBoltGroup = new THREE.Group();
+  outerBoltGroup.add(innerBoltGroup);
+  state.boltTemplate = outerBoltGroup;
 
   loadingLabel.textContent = 'Загрузка яблока…';
   const appleGLB = await loadGLB('Shark apple.glb');
   state.appleTemplate = appleGLB.scene;
   enableShadows(state.appleTemplate);
 
-  // Build the mug ourselves — it's part of the scene composition, not a separate asset.
   buildMugAndApple();
 
   document.getElementById('loading').style.display = 'none';
@@ -621,55 +713,83 @@ async function boot() {
 }
 
 // ---------------------------------------------------------------------------
-// Mug + apple
+// Trestle table + mug + apple (matches the reference image composition)
 // ---------------------------------------------------------------------------
-const MUG_POS = new THREE.Vector3(0, 1.05, -2.4);
-const APPLE_POS = new THREE.Vector3(0, 1.42, -2.4);
+const TARGET_DIST = 3.0;             // distance in front of camera
+const TABLE_TOP_Y = 0.95;            // sawhorse plank height
+const MUG_BASE_Y  = TABLE_TOP_Y + 0.02;
+const MUG_HEIGHT  = 0.30;
+const APPLE_SIZE  = 0.22;            // larger so it's clearly visible
+const FOCUS_X     = -0.1;            // slight off-center, like the reference
+
+function buildSawhorse() {
+  const wood = new THREE.MeshStandardMaterial({ color: 0xa37448, roughness: 0.88 });
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.06, 0.42), wood);
+  plank.position.y = TABLE_TOP_Y;
+  plank.castShadow = true; plank.receiveShadow = true;
+
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, TABLE_TOP_Y, 0.06), wood);
+  leg.castShadow = true; leg.receiveShadow = true;
+
+  const trestle = new THREE.Group();
+  // Two pairs of crossed legs
+  for (const xs of [-0.55, 0.55]) {
+    const l1 = leg.clone();
+    l1.position.set(xs - 0.12, TABLE_TOP_Y / 2 - 0.03, 0);
+    l1.rotation.z = 0.18;
+    const l2 = leg.clone();
+    l2.position.set(xs + 0.12, TABLE_TOP_Y / 2 - 0.03, 0);
+    l2.rotation.z = -0.18;
+    trestle.add(l1, l2);
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.05), wood);
+    cross.position.set(xs, TABLE_TOP_Y - 0.18, 0);
+    trestle.add(cross);
+  }
+  trestle.add(plank);
+  return trestle;
+}
+
+function buildMug() {
+  const mug = new THREE.Group();
+  const matWood = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 });
+  const matRim  = new THREE.MeshStandardMaterial({ color: 0x4a2f17, roughness: 0.85, metalness: 0.2 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.062, MUG_HEIGHT, 22), matWood);
+  body.position.y = MUG_HEIGHT / 2;
+  body.castShadow = true; body.receiveShadow = true;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.008, 8, 22), matRim);
+  rim.position.y = MUG_HEIGHT - 0.005;
+  rim.rotation.x = Math.PI / 2;
+  const baseRing = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.008, 8, 22), matRim);
+  baseRing.position.y = 0.005;
+  baseRing.rotation.x = Math.PI / 2;
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 16, Math.PI), matWood);
+  handle.position.set(0.085, MUG_HEIGHT / 2, 0);
+  handle.rotation.y = Math.PI / 2;
+  const foam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.073, 0.073, 0.015, 22),
+    new THREE.MeshStandardMaterial({ color: 0xf2e6c2, roughness: 0.65 })
+  );
+  foam.position.y = MUG_HEIGHT - 0.01;
+  mug.add(body, rim, baseRing, handle, foam);
+  mug.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return mug;
+}
+
+let SAWHORSE_POS;
+let MUG_POS;
+let APPLE_POS;
 
 function buildMugAndApple() {
-  // Mug: simple wooden tankard.
-  const mug = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.13, 0.11, 0.28, 18),
-    new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 })
-  );
-  body.castShadow = true; body.receiveShadow = true;
-  const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(0.13, 0.012, 8, 18),
-    new THREE.MeshStandardMaterial({ color: 0x5a3a1f, roughness: 0.85 })
-  );
-  rim.rotation.x = Math.PI / 2;
-  rim.position.y = 0.14;
-  const base = new THREE.Mesh(
-    new THREE.TorusGeometry(0.11, 0.012, 8, 18),
-    new THREE.MeshStandardMaterial({ color: 0x5a3a1f, roughness: 0.85 })
-  );
-  base.rotation.x = Math.PI / 2;
-  base.position.y = -0.14;
-  const handle = new THREE.Mesh(
-    new THREE.TorusGeometry(0.07, 0.018, 8, 16, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 })
-  );
-  handle.position.set(0.14, 0, 0);
-  handle.rotation.y = Math.PI / 2;
-  // Foam top
-  const foam = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.125, 0.125, 0.02, 18),
-    new THREE.MeshStandardMaterial({ color: 0xf3e7c4, roughness: 0.7 })
-  );
-  foam.position.y = 0.14;
-  mug.add(body, rim, base, handle, foam);
-  mug.castShadow = true;
-  // Stand the mug on a small barrel/stand so it's visible.
-  const stand = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.28, 0.32, 0.7, 12),
-    new THREE.MeshStandardMaterial({ color: 0x4a3220, roughness: 0.95 })
-  );
-  stand.position.y = -0.49;
-  stand.castShadow = true;
-  stand.receiveShadow = true;
-  mug.add(stand);
+  // Anchor the whole composition relative to the camera's forward.
+  SAWHORSE_POS = new THREE.Vector3(FOCUS_X, 0, -TARGET_DIST);
+  MUG_POS      = new THREE.Vector3(FOCUS_X, MUG_BASE_Y, -TARGET_DIST);
+  APPLE_POS    = new THREE.Vector3(FOCUS_X, MUG_BASE_Y + MUG_HEIGHT + APPLE_SIZE * 0.42, -TARGET_DIST);
 
+  const trestle = buildSawhorse();
+  trestle.position.copy(SAWHORSE_POS);
+  scene.add(trestle);
+
+  const mug = buildMug();
   mug.position.copy(MUG_POS);
   scene.add(mug);
   state.mug = mug;
@@ -679,7 +799,6 @@ function buildMugAndApple() {
 
 function spawnApple() {
   const apple = state.appleTemplate.clone(true);
-  // Re-clone materials so fragmentation doesn't mutate the template.
   apple.traverse(o => {
     if (o.isMesh) {
       o.castShadow = true;
@@ -688,16 +807,14 @@ function spawnApple() {
     }
   });
   const ab = computeBBox(apple);
-  const targetSize = 0.18;
-  const s = targetSize / Math.max(ab.size.x, ab.size.y, ab.size.z);
+  const s = APPLE_SIZE / Math.max(ab.size.x, ab.size.y, ab.size.z);
   apple.scale.setScalar(s);
-  // Sit it on top of the mug foam.
+  // Recompute bbox after scaling so we can rest its bottom on the foam.
   apple.position.copy(APPLE_POS);
-  apple.position.y = MUG_POS.y + 0.14 + targetSize * 0.45;
   scene.add(apple);
   state.apple = apple;
   state.appleAlive = true;
-  state.appleHitbox = { center: apple.position.clone(), radius: targetSize * 0.55 };
+  state.appleHitbox = { center: apple.position.clone(), radius: APPLE_SIZE * 0.55 };
 }
 
 function respawnApple() {
@@ -739,10 +856,18 @@ function tryShoot() {
   // Spawn bolt with the camera's current forward direction.
   const bolt = state.boltTemplate.clone(true);
   bolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
+  // Add a translucent streak behind the bolt so the flight is visually obvious.
+  const streak = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.004, 0.0005, 1.1, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.55, depthWrite: false })
+  );
+  streak.rotation.x = -Math.PI / 2;   // align cylinder along local Z
+  streak.position.z = 0.55;           // sits behind the bolt (bolt forward = -Z)
+  bolt.add(streak);
   scene.add(bolt);
 
-  // Start position: a bit in front of the camera, slightly below center (muzzle).
-  const muzzleLocal = new THREE.Vector3(0.05, -0.05, -0.6);
+  // Start position: at the crossbow muzzle, in front of the camera.
+  const muzzleLocal = new THREE.Vector3(0.10, -0.10, -0.75);
   const startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
   bolt.position.copy(startPos);
 
@@ -775,8 +900,8 @@ function tryShoot() {
     obj: bolt,
     pos: startPos.clone(),
     dir: dir.clone(),
-    speed: 26,
-    life: 2.5,
+    speed: 13,
+    life: 3.0,
     willHit,
     hitPoint,
     resolved: false,
@@ -903,7 +1028,7 @@ function tick() {
   // Apply to camera.
   camera.rotation.order = 'YXZ';
   camera.rotation.y = state.aimSmooth.x * 0.35 + state.cameraSway.x;
-  camera.rotation.x = state.aimSmooth.y * 0.28 + state.cameraSway.y + state.recoilOffset * 0.12;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y * 0.28 + state.cameraSway.y + state.recoilOffset * 0.12;
 
   // Animation mixer (crossbow shoot anim)
   if (state.crossbowMixer) state.crossbowMixer.update(dt);
@@ -955,11 +1080,13 @@ function tick() {
     f.obj.rotation.x += f.ang.x * dt;
     f.obj.rotation.y += f.ang.y * dt;
     f.obj.rotation.z += f.ang.z * dt;
-    // Bounce on the mug-top plane
-    const mugTopY = MUG_POS.y + 0.15;
-    if (f.obj.position.y < mugTopY && Math.abs(f.obj.position.x - MUG_POS.x) < 0.16 && Math.abs(f.obj.position.z - MUG_POS.z) < 0.16) {
-      f.obj.position.y = mugTopY;
-      f.vel.y = -f.vel.y * 0.3;
+    // Bounce on the trestle plank
+    const plankY = TABLE_TOP_Y + 0.035;
+    if (f.obj.position.y < plankY
+        && Math.abs(f.obj.position.x - SAWHORSE_POS.x) < 0.7
+        && Math.abs(f.obj.position.z - SAWHORSE_POS.z) < 0.21) {
+      f.obj.position.y = plankY;
+      f.vel.y = -f.vel.y * 0.35;
       f.vel.x *= 0.7; f.vel.z *= 0.7;
     }
     // Ground
