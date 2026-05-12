@@ -95,6 +95,7 @@
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 4;
+    will-change: left, top;
   }
   #crosshair .ring {
     position: absolute; inset: 0;
@@ -350,8 +351,11 @@ scene.fog = new THREE.Fog(0x1a1611, 12, 28);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.position.set(0, 1.55, 0);
-// Base pitch keeps the apple roughly at screen center at neutral aim.
+// Camera is essentially static. A small base pitch puts the mug+apple near screen center.
+// The reticle moves with the mouse (pointer-style), exactly like the 2D sandbox.
 const BASE_PITCH = -0.06;
+camera.rotation.order = 'YXZ';
+camera.rotation.x = BASE_PITCH;
 
 // Lights — warm, low-poly tavern mood.
 scene.add(new THREE.AmbientLight(0x6a5840, 0.7));
@@ -843,10 +847,13 @@ function tryShoot() {
     state.crossbowAction.play();
   }
 
-  // Recoil
-  state.recoilVel -= 1.8 * state.recoilStrength;
-  state.cameraSwayVel.x += (Math.random() - 0.5) * 0.6 * state.recoilStrength;
-  state.cameraSwayVel.y += (Math.random() - 0.5) * 0.4 * state.recoilStrength;
+  // Recoil — like the 2D sandbox: a strong upward kick to the aim (reticle),
+  // plus a small camera shake and pitch kick.
+  state.aimVel.y += 6.0 * state.recoilStrength;
+  state.aimVel.x += (Math.random() - 0.5) * 2.5 * state.recoilStrength;
+  state.recoilVel -= 1.2 * state.recoilStrength;
+  state.cameraSwayVel.x += (Math.random() - 0.5) * 0.3 * state.recoilStrength;
+  state.cameraSwayVel.y += (Math.random() - 0.5) * 0.2 * state.recoilStrength;
 
   // Muzzle flash
   const fl = document.getElementById('flash');
@@ -871,9 +878,9 @@ function tryShoot() {
   const startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
   bolt.position.copy(startPos);
 
-  // Direction: from start through the current aim point.
-  const aimWorld = getAimWorldPoint();
-  const dir = aimWorld.clone().sub(startPos).normalize();
+  // Direction: from the muzzle along the camera's reticle ray. This way the bolt
+  // really goes wherever the drunken crosshair is pointing.
+  const dir = getAimRayDir();
   bolt.lookAt(startPos.clone().add(dir));
 
   state.shots++;
@@ -908,11 +915,11 @@ function tryShoot() {
   });
 }
 
-function getAimWorldPoint() {
-  // Bolt goes along the camera's current forward — drunk drift is encoded in the camera rotation.
-  const v = new THREE.Vector3(0, 0, -8);
-  v.applyMatrix4(camera.matrixWorld);
-  return v;
+const _raycaster = new THREE.Raycaster();
+function getAimRayDir() {
+  // Reticle-style aim: cast a ray from the camera through the on-screen reticle (NDC) position.
+  _raycaster.setFromCamera({ x: state.aimSmooth.x, y: state.aimSmooth.y }, camera);
+  return _raycaster.ray.direction.clone();
 }
 
 // ---------------------------------------------------------------------------
@@ -994,16 +1001,19 @@ function tick() {
   const dt = Math.min(0.05, clock.getDelta());
   state.t += dt;
 
-  // Drunk drift: smooth wandering toward mouse aim with low-freq noise.
+  // Pointer-style drunk aim — exactly like the 2D sandbox:
+  // the reticle springs toward the mouse, with low-frequency noise pulling it off
+  // and a gentle re-centering spring. Output is `state.aimSmooth` in screen NDC
+  // (x right, y up, both in roughly [-1..1]).
   const t = state.t;
   const drift = state.drunk;
   const noiseX = Math.sin(t * 0.9) * 0.35 + Math.sin(t * 2.3 + 1.2) * 0.18 + Math.sin(t * 0.4 + 0.7) * 0.45;
   const noiseY = Math.cos(t * 0.8 + 0.5) * 0.32 + Math.sin(t * 1.7 + 2.4) * 0.2 + Math.cos(t * 0.35) * 0.4;
-  const targetX = state.aim.x * 0.45 + noiseX * drift * 0.4;
-  const targetY = state.aim.y * 0.4 + noiseY * drift * 0.3;
-  // Spring to target.
-  const sx = (targetX - state.aimSmooth.x) * 14;
-  const sy = (targetY - state.aimSmooth.y) * 14;
+  const driftX = noiseX * drift * 0.45;
+  const driftY = noiseY * drift * 0.35;
+  // Spring toward mouse, plus a weak recenter pull, plus the noise drift.
+  const sx = (state.aim.x - state.aimSmooth.x) * 18 + driftX * 6 - state.aimSmooth.x * 1.0;
+  const sy = (state.aim.y - state.aimSmooth.y) * 18 + driftY * 6 - state.aimSmooth.y * 1.0;
   state.aimVel.x += sx * dt;
   state.aimVel.y += sy * dt;
   const damp = Math.exp(-state.damp * dt);
@@ -1011,24 +1021,32 @@ function tick() {
   state.aimSmooth.x += state.aimVel.x * dt;
   state.aimSmooth.y += state.aimVel.y * dt;
 
-  // Camera sway — base oscillation + recoil impulse.
-  const baseSwayX = Math.sin(t * 0.7) * 0.015 * drift;
-  const baseSwayY = Math.cos(t * 0.55 + 1.1) * 0.012 * drift;
+  // Subtle camera sway in world space — the player's view wobbles a bit from being drunk,
+  // but it does NOT track the mouse. Only the reticle does.
+  const baseSwayX = Math.sin(t * 0.7) * 0.012 * drift;
+  const baseSwayY = Math.cos(t * 0.55 + 1.1) * 0.010 * drift;
   state.cameraSwayVel.x += -(state.cameraSway.x - baseSwayX) * 8 * dt;
   state.cameraSwayVel.y += -(state.cameraSway.y - baseSwayY) * 8 * dt;
   state.cameraSwayVel.multiplyScalar(Math.exp(-4 * dt));
   state.cameraSway.x += state.cameraSwayVel.x * dt;
   state.cameraSway.y += state.cameraSwayVel.y * dt;
 
-  // Recoil offset (vertical pitch kick)
+  // Recoil: vertical kick that decays back to zero.
   state.recoilVel += -state.recoilOffset * 30 * dt;
   state.recoilVel *= Math.exp(-6 * dt);
   state.recoilOffset += state.recoilVel * dt;
 
-  // Apply to camera.
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = state.aimSmooth.x * 0.35 + state.cameraSway.x;
-  camera.rotation.x = BASE_PITCH + state.aimSmooth.y * 0.28 + state.cameraSway.y + state.recoilOffset * 0.12;
+  // Camera orientation: fixed base pitch + small drunk sway + recoil kick.
+  // Aim does NOT rotate the camera — it only moves the reticle on screen.
+  camera.rotation.y = state.cameraSway.x;
+  camera.rotation.x = BASE_PITCH + state.cameraSway.y + state.recoilOffset * 0.10;
+
+  // Position the crosshair element at the aim screen position.
+  const chEl = document.getElementById('crosshair');
+  const cx = (state.aimSmooth.x * 0.5 + 0.5) * window.innerWidth;
+  const cy = (-state.aimSmooth.y * 0.5 + 0.5) * window.innerHeight;
+  chEl.style.left = cx + 'px';
+  chEl.style.top  = cy + 'px';
 
   // Animation mixer (crossbow shoot anim)
   if (state.crossbowMixer) state.crossbowMixer.update(dt);
@@ -1106,16 +1124,12 @@ function tick() {
     return true;
   });
 
-  // Crosshair color: green if our aim ray actually intersects the apple.
+  // Crosshair color: green if the reticle ray actually hits the apple.
   const ch = document.getElementById('crosshair');
   if (state.appleAlive && state.appleHitbox) {
-    const ndc = new THREE.Vector3(0, 0, 0.5);
     const startPos = new THREE.Vector3();
     camera.getWorldPosition(startPos);
-    const dir = new THREE.Vector3();
-    // Use exactly the same logic as the bolt: aim point - start.
-    const aimWorld = getAimWorldPoint();
-    dir.copy(aimWorld).sub(startPos).normalize();
+    const dir = getAimRayDir();
     const oc = startPos.clone().sub(state.appleHitbox.center);
     const bd = oc.dot(dir);
     const c = oc.dot(oc) - state.appleHitbox.radius * state.appleHitbox.radius;
