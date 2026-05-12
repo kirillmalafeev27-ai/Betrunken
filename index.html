@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Betrunken — Crossbow Tavern</title>
+<style>
+  :root {
+    --bg: #1a1916;
+    --panel: #242220;
+    --panel-2: #2f2c28;
+    --text: #e8e3d8;
+    --text-dim: #9a948a;
+    --accent: #c89060;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .hud-card {
+    background: rgba(20,18,16,0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(200,144,96,0.15);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text);
+    pointer-events: auto;
+  }
+  .hud-card h1 { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--accent); letter-spacing: 0.5px; }
+  .hud-card .sub { color: var(--text-dim); font-size: 12px; }
+  .stats { font-variant-numeric: tabular-nums; }
+  .stats b { color: var(--accent); font-weight: 600; }
+
+  #controls {
+    position: absolute; bottom: 14px; left: 14px; right: 14px;
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .ctl {
+    background: rgba(20,18,16,0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(200,144,96,0.15);
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex; align-items: center; gap: 10px;
+    pointer-events: auto;
+    font-size: 12px;
+  }
+  .ctl label { color: var(--text-dim); }
+  .ctl input[type=range] { accent-color: var(--accent); width: 110px; }
+  .ctl .val { font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid #3a3733;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  button:hover { background: #3a3733; }
+
+  #loading {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    z-index: 100;
+    flex-direction: column;
+    gap: 14px;
+  }
+  #loading .ring {
+    width: 40px; height: 40px;
+    border: 3px solid rgba(200,144,96,0.18);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  #loading .label { color: var(--text-dim); font-size: 13px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #crosshair {
+    position: absolute; top: 50%; left: 50%;
+    width: 64px; height: 64px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 4;
+  }
+  #crosshair .ring {
+    position: absolute; inset: 0;
+    border: 1.5px solid rgba(226,75,74,0.85);
+    border-radius: 50%;
+    transition: border-color 0.12s;
+  }
+  #crosshair.on .ring { border-color: rgba(93,202,165,0.95); }
+  #crosshair .dot {
+    position: absolute; top: 50%; left: 50%;
+    width: 3px; height: 3px;
+    margin: -1.5px 0 0 -1.5px;
+    background: rgba(255,255,255,0.7);
+    border-radius: 50%;
+  }
+
+  #flash {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at center, rgba(255,220,150,0.0) 0%, rgba(255,220,150,0) 60%);
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 0.05s;
+  }
+  #flash.on { opacity: 1; background: radial-gradient(circle at center, rgba(255,220,150,0.35) 0%, rgba(255,220,150,0) 50%); }
+
+  #start {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10,9,8,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 50;
+  }
+  #start .panel {
+    background: var(--panel);
+    border: 1px solid rgba(200,144,96,0.2);
+    border-radius: 14px;
+    padding: 28px 32px;
+    text-align: center;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.5);
+    max-width: 420px;
+  }
+  #start h2 { margin: 0 0 8px; color: var(--accent); font-size: 22px; letter-spacing: 1px; }
+  #start p { margin: 0 0 18px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+  #start button { font-size: 14px; padding: 10px 24px; background: var(--accent); color: #1a1916; border: none; font-weight: 600; }
+  #start button:hover { background: #d9a073; }
+  #start .keys { display: flex; gap: 10px; justify-content: center; margin: 14px 0 20px; flex-wrap: wrap; }
+  #start .key { font-size: 11px; color: var(--text); background: var(--panel-2); padding: 4px 10px; border-radius: 6px; border: 1px solid #3a3733; }
+  #start .key b { color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="flash"></div>
+  <div id="crosshair"><div class="ring"></div><div class="dot"></div></div>
+
+  <div id="hud">
+    <div class="hud-card">
+      <h1>BETRUNKEN</h1>
+      <div class="sub">арбалет · таверна · яблоко</div>
+    </div>
+    <div class="hud-card stats">
+      выстрелов: <b id="shots">0</b> &nbsp;·&nbsp; попаданий: <b id="hits">0</b> &nbsp;·&nbsp; <span id="acc">—</span>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="ctl">
+      <label>Опьянение</label>
+      <input id="s-drunk" type="range" min="0" max="3" step="0.05" value="1.0">
+      <span class="val" id="s-drunk-v">1.00</span>
+    </div>
+    <div class="ctl">
+      <label>Демпф.</label>
+      <input id="s-damp" type="range" min="0.5" max="10" step="0.1" value="3.5">
+      <span class="val" id="s-damp-v">3.5</span>
+    </div>
+    <div class="ctl">
+      <label>Отдача</label>
+      <input id="s-recoil" type="range" min="0" max="2" step="0.05" value="0.7">
+      <span class="val" id="s-recoil-v">0.70</span>
+    </div>
+    <div class="ctl">
+      <button id="reset">Сброс</button>
+      <button id="respawn">Новое яблоко</button>
+    </div>
+  </div>
+
+  <div id="loading">
+    <div class="ring"></div>
+    <div class="label" id="loading-label">Загрузка ассетов…</div>
+  </div>
+
+  <div id="start" style="display:none">
+    <div class="panel">
+      <h2>BETRUNKEN</h2>
+      <p>Сбей яблоко с кружки. Прицел плавает — это всё хмель. Целься в центр и стреляй болтом из арбалета.</p>
+      <div class="keys">
+        <div class="key"><b>ЛКМ</b> / <b>Space</b> — выстрел</div>
+        <div class="key"><b>Мышь</b> — целиться</div>
+        <div class="key"><b>R</b> — новое яблоко</div>
+      </div>
+      <button id="start-btn">Начать</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------------------------------------------------------------------------
+// Audio: synthesized via WebAudio so we don't depend on external files.
+// ---------------------------------------------------------------------------
+const AudioFx = (() => {
+  let ctx = null;
+  function ensure() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+
+  function shot() {
+    const ac = ensure();
+    const now = ac.currentTime;
+    // Sharp twang: noise burst + descending tone.
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.18, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ac.sampleRate;
+      const env = Math.exp(-t * 22);
+      data[i] = (Math.random() * 2 - 1) * env * 0.5;
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const noiseGain = ac.createGain();
+    noiseGain.gain.value = 0.6;
+    const filter = ac.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1200;
+    filter.Q.value = 1.5;
+    src.connect(filter).connect(noiseGain).connect(ac.destination);
+    src.start(now);
+
+    const osc = ac.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(380, now);
+    osc.frequency.exponentialRampToValueAtTime(90, now + 0.18);
+    const og = ac.createGain();
+    og.gain.setValueAtTime(0.0, now);
+    og.gain.linearRampToValueAtTime(0.35, now + 0.005);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    osc.connect(og).connect(ac.destination);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
+  function miss() {
+    const ac = ensure();
+    const now = ac.currentTime;
+    // Thunk: low thump + small wood crack.
+    const osc = ac.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(60, now + 0.18);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0, now);
+    g.gain.linearRampToValueAtTime(0.45, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+    osc.connect(g).connect(ac.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.08, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ac.sampleRate;
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 40);
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const ng = ac.createGain();
+    ng.gain.value = 0.2;
+    const f = ac.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 800;
+    src.connect(f).connect(ng).connect(ac.destination);
+    src.start(now);
+  }
+
+  function hit() {
+    const ac = ensure();
+    const now = ac.currentTime;
+    // Juicy splat: short noise + bright crack.
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.35, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ac.sampleRate;
+      const env = Math.exp(-t * 8) * (1 + 0.4 * Math.sin(t * 90));
+      data[i] = (Math.random() * 2 - 1) * env * 0.6;
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const f = ac.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 2200;
+    const g = ac.createGain();
+    g.gain.value = 0.55;
+    src.connect(f).connect(g).connect(ac.destination);
+    src.start(now);
+
+    const osc = ac.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(620, now);
+    osc.frequency.exponentialRampToValueAtTime(120, now + 0.12);
+    const og = ac.createGain();
+    og.gain.setValueAtTime(0.0, now);
+    og.gain.linearRampToValueAtTime(0.25, now + 0.005);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+    osc.connect(og).connect(ac.destination);
+    osc.start(now);
+    osc.stop(now + 0.16);
+  }
+
+  return { shot, miss, hit, ensure };
+})();
+
+// ---------------------------------------------------------------------------
+// Scene setup
+// ---------------------------------------------------------------------------
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1611);
+scene.fog = new THREE.Fog(0x1a1611, 12, 28);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
+camera.position.set(0, 1.55, 2.4);
+
+// Lights — warm, low-poly tavern mood.
+scene.add(new THREE.AmbientLight(0x5a4a38, 0.55));
+const hemi = new THREE.HemisphereLight(0xffd9a8, 0x2a1f15, 0.6);
+scene.add(hemi);
+
+const fire = new THREE.PointLight(0xffa040, 4.2, 12, 1.8);
+fire.position.set(-2.6, 1.2, 1.5);
+fire.castShadow = true;
+fire.shadow.mapSize.set(512, 512);
+scene.add(fire);
+
+const window_light = new THREE.DirectionalLight(0xffe1b3, 1.2);
+window_light.position.set(3, 4, -2);
+window_light.castShadow = true;
+window_light.shadow.mapSize.set(1024, 1024);
+window_light.shadow.camera.left = -6;
+window_light.shadow.camera.right = 6;
+window_light.shadow.camera.top = 6;
+window_light.shadow.camera.bottom = -6;
+window_light.shadow.camera.near = 0.1;
+window_light.shadow.camera.far = 20;
+scene.add(window_light);
+
+const aimLight = new THREE.PointLight(0xffe6c0, 1.0, 6, 1.5);
+aimLight.position.set(0, 1.8, 0.5);
+scene.add(aimLight);
+
+// ---------------------------------------------------------------------------
+// Asset loading
+// ---------------------------------------------------------------------------
+const loader = new GLTFLoader();
+const loadingLabel = document.getElementById('loading-label');
+
+function loadGLB(path) {
+  return new Promise((resolve, reject) => {
+    loader.load(path, resolve, undefined, reject);
+  });
+}
+
+function enableShadows(obj) {
+  obj.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => { if (m.map) m.map.colorSpace = THREE.SRGBColorSpace; });
+        else if (o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace;
+      }
+    }
+  });
+}
+
+// Compute bbox for any object3D
+function computeBBox(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  return { box, size, center };
+}
+
+// ---------------------------------------------------------------------------
+// Game state
+// ---------------------------------------------------------------------------
+const state = {
+  shots: 0,
+  hits: 0,
+  appleAlive: true,
+  bolts: [],         // active flying bolts
+  fragments: [],     // apple fragments after a hit
+  apple: null,       // current apple Object3D
+  appleHitbox: null, // sphere {center, radius}
+  mug: null,
+  crossbow: null,
+  crossbowMixer: null,
+  crossbowAction: null,
+  boltTemplate: null, // a clone-able bolt mesh extracted from the crossbow
+  drunk: 1.0,
+  damp: 3.5,
+  recoilStrength: 0.7,
+  aim: new THREE.Vector2(0, 0),   // [-1..1] target pos on screen
+  aimSmooth: new THREE.Vector2(0, 0),
+  aimVel: new THREE.Vector2(0, 0),
+  cameraSway: new THREE.Vector2(0, 0),
+  cameraSwayVel: new THREE.Vector2(0, 0),
+  recoilOffset: 0,
+  recoilVel: 0,
+  shooting: false,
+  canShoot: true,
+  t: 0,
+};
+
+// ---------------------------------------------------------------------------
+// UI bindings
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+function bindSlider(id, key, fmt) {
+  const el = $('s-' + id), out = $('s-' + id + '-v');
+  el.addEventListener('input', () => { state[key] = parseFloat(el.value); out.textContent = fmt(state[key]); });
+  out.textContent = fmt(state[key]);
+}
+bindSlider('drunk', 'drunk', v => v.toFixed(2));
+bindSlider('damp', 'damp', v => v.toFixed(1));
+bindSlider('recoil', 'recoilStrength', v => v.toFixed(2));
+
+function updateStats() {
+  $('shots').textContent = state.shots;
+  $('hits').textContent = state.hits;
+  $('acc').textContent = state.shots ? Math.round(state.hits / state.shots * 100) + '%' : '—';
+}
+
+$('reset').addEventListener('click', () => { state.shots = 0; state.hits = 0; updateStats(); });
+$('respawn').addEventListener('click', respawnApple);
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+window.addEventListener('mousemove', e => {
+  state.aim.x = (e.clientX / window.innerWidth) * 2 - 1;
+  state.aim.y = -((e.clientY / window.innerHeight) * 2 - 1);
+});
+window.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  if (document.getElementById('start').style.display !== 'none') return;
+  // Ignore clicks on HUD controls
+  if (e.target.closest('.ctl') || e.target.closest('.hud-card') || e.target.tagName === 'BUTTON') return;
+  tryShoot();
+});
+window.addEventListener('keydown', e => {
+  if (document.getElementById('start').style.display !== 'none') return;
+  if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
+  if (e.code === 'KeyR') { respawnApple(); }
+});
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+async function boot() {
+  loadingLabel.textContent = 'Загрузка таверны…';
+  const tavernGLB = await loadGLB('low-poly_medieval_tavern.glb');
+  const tavern = tavernGLB.scene;
+  enableShadows(tavern);
+  // Fit the tavern interior roughly around origin.
+  const { size, center } = computeBBox(tavern);
+  const scale = 8 / Math.max(size.x, size.z);
+  tavern.scale.setScalar(scale);
+  tavern.position.x -= center.x * scale;
+  tavern.position.z -= center.z * scale;
+  tavern.position.y -= (center.y - size.y / 2) * scale;
+  scene.add(tavern);
+
+  loadingLabel.textContent = 'Загрузка арбалета…';
+  const crossbowGLB = await loadGLB('medieval_crossbow_with_bolt.glb');
+  const crossbow = crossbowGLB.scene;
+  enableShadows(crossbow);
+  // First-person placement: attach to camera.
+  const cb = computeBBox(crossbow);
+  const cbScale = 0.55 / Math.max(cb.size.x, cb.size.y, cb.size.z);
+  crossbow.scale.setScalar(cbScale);
+  // Re-center, then offset into bottom-right of the FOV.
+  crossbow.position.sub(cb.center.clone().multiplyScalar(cbScale));
+  const crossbowRig = new THREE.Group();
+  crossbowRig.add(crossbow);
+  crossbowRig.position.set(0.18, -0.22, -0.55);
+  crossbowRig.rotation.set(-0.05, -0.15, 0);
+  camera.add(crossbowRig);
+  scene.add(camera);
+  state.crossbow = crossbowRig;
+  state.crossbowInner = crossbow;
+
+  // Animation mixer
+  if (crossbowGLB.animations && crossbowGLB.animations.length) {
+    state.crossbowMixer = new THREE.AnimationMixer(crossbow);
+    state.crossbowAction = state.crossbowMixer.clipAction(crossbowGLB.animations[0]);
+    state.crossbowAction.setLoop(THREE.LoopOnce, 1);
+    state.crossbowAction.clampWhenFinished = true;
+  }
+
+  // Try to find a bolt mesh inside the crossbow to clone as the projectile.
+  let candidate = null;
+  crossbow.traverse(o => {
+    if (!o.isMesh) return;
+    const n = (o.name || '').toLowerCase();
+    if (n.includes('bolt') || n.includes('arrow') || n.includes('quarrel')) {
+      candidate = o;
+    }
+  });
+  if (!candidate) {
+    // Fall back: pick the longest, thinnest mesh in the model.
+    let best = null, bestRatio = 0;
+    crossbow.traverse(o => {
+      if (!o.isMesh) return;
+      const b = new THREE.Box3().setFromObject(o);
+      const s = new THREE.Vector3(); b.getSize(s);
+      const longest = Math.max(s.x, s.y, s.z);
+      const others = (s.x + s.y + s.z - longest) / 2 || 0.0001;
+      const ratio = longest / others;
+      if (ratio > bestRatio && longest > 0.05) { bestRatio = ratio; best = o; }
+    });
+    candidate = best;
+  }
+  if (candidate) {
+    const bolt = candidate.clone(true);
+    bolt.traverse(o => { if (o.isMesh) { o.castShadow = true; o.material = o.material.clone(); } });
+    // Normalize size — we want a bolt about 0.6m long.
+    const bb = new THREE.Box3().setFromObject(bolt);
+    const bs = new THREE.Vector3(); bb.getSize(bs);
+    const longest = Math.max(bs.x, bs.y, bs.z);
+    const targetLen = 0.6;
+    const bScale = targetLen / longest;
+    bolt.scale.setScalar(bScale);
+    // Center on origin and align longest axis to +Z (we'll rotate later if needed).
+    bb.setFromObject(bolt);
+    const bc = new THREE.Vector3(); bb.getCenter(bc);
+    bolt.position.sub(bc);
+    // Determine axis along which the bolt is longest, rotate to +Z.
+    bb.setFromObject(bolt);
+    bb.getSize(bs);
+    const wrap = new THREE.Group();
+    wrap.add(bolt);
+    // Make the bolt's longest axis align with -Z (which is the forward axis after lookAt).
+    if (bs.x >= bs.y && bs.x >= bs.z) wrap.rotation.y = Math.PI / 2;
+    else if (bs.y >= bs.x && bs.y >= bs.z) wrap.rotation.x = -Math.PI / 2;
+    state.boltTemplate = wrap;
+  } else {
+    // Fallback: build a basic bolt.
+    const g = new THREE.Group();
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, 0.55, 8),
+      new THREE.MeshStandardMaterial({ color: 0x8a6a44 })
+    );
+    shaft.rotation.x = Math.PI / 2;
+    const tip = new THREE.Mesh(
+      new THREE.ConeGeometry(0.022, 0.08, 8),
+      new THREE.MeshStandardMaterial({ color: 0x8a8a8a, metalness: 0.7, roughness: 0.3 })
+    );
+    tip.rotation.x = -Math.PI / 2;
+    tip.position.z = -0.31;
+    const fletch = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.001, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0xc0392b })
+    );
+    fletch.position.z = 0.22;
+    g.add(shaft, tip, fletch);
+    state.boltTemplate = g;
+  }
+
+  loadingLabel.textContent = 'Загрузка яблока…';
+  const appleGLB = await loadGLB('Shark apple.glb');
+  state.appleTemplate = appleGLB.scene;
+  enableShadows(state.appleTemplate);
+
+  // Build the mug ourselves — it's part of the scene composition, not a separate asset.
+  buildMugAndApple();
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('start').style.display = 'flex';
+  document.getElementById('start-btn').addEventListener('click', () => {
+    AudioFx.ensure();
+    document.getElementById('start').style.display = 'none';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Mug + apple
+// ---------------------------------------------------------------------------
+const MUG_POS = new THREE.Vector3(0, 1.05, -2.4);
+const APPLE_POS = new THREE.Vector3(0, 1.42, -2.4);
+
+function buildMugAndApple() {
+  // Mug: simple wooden tankard.
+  const mug = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.13, 0.11, 0.28, 18),
+    new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 })
+  );
+  body.castShadow = true; body.receiveShadow = true;
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.13, 0.012, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x5a3a1f, roughness: 0.85 })
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.14;
+  const base = new THREE.Mesh(
+    new THREE.TorusGeometry(0.11, 0.012, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x5a3a1f, roughness: 0.85 })
+  );
+  base.rotation.x = Math.PI / 2;
+  base.position.y = -0.14;
+  const handle = new THREE.Mesh(
+    new THREE.TorusGeometry(0.07, 0.018, 8, 16, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 })
+  );
+  handle.position.set(0.14, 0, 0);
+  handle.rotation.y = Math.PI / 2;
+  // Foam top
+  const foam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.125, 0.125, 0.02, 18),
+    new THREE.MeshStandardMaterial({ color: 0xf3e7c4, roughness: 0.7 })
+  );
+  foam.position.y = 0.14;
+  mug.add(body, rim, base, handle, foam);
+  mug.castShadow = true;
+  // Stand the mug on a small barrel/stand so it's visible.
+  const stand = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.32, 0.7, 12),
+    new THREE.MeshStandardMaterial({ color: 0x4a3220, roughness: 0.95 })
+  );
+  stand.position.y = -0.49;
+  stand.castShadow = true;
+  stand.receiveShadow = true;
+  mug.add(stand);
+
+  mug.position.copy(MUG_POS);
+  scene.add(mug);
+  state.mug = mug;
+
+  spawnApple();
+}
+
+function spawnApple() {
+  const apple = state.appleTemplate.clone(true);
+  // Re-clone materials so fragmentation doesn't mutate the template.
+  apple.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      o.material = o.material.clone();
+    }
+  });
+  const ab = computeBBox(apple);
+  const targetSize = 0.18;
+  const s = targetSize / Math.max(ab.size.x, ab.size.y, ab.size.z);
+  apple.scale.setScalar(s);
+  // Sit it on top of the mug foam.
+  apple.position.copy(APPLE_POS);
+  apple.position.y = MUG_POS.y + 0.14 + targetSize * 0.45;
+  scene.add(apple);
+  state.apple = apple;
+  state.appleAlive = true;
+  state.appleHitbox = { center: apple.position.clone(), radius: targetSize * 0.55 };
+}
+
+function respawnApple() {
+  if (state.apple) { scene.remove(state.apple); state.apple = null; }
+  // Clear fragments
+  for (const f of state.fragments) scene.remove(f.obj);
+  state.fragments = [];
+  spawnApple();
+}
+
+// ---------------------------------------------------------------------------
+// Shooting
+// ---------------------------------------------------------------------------
+function tryShoot() {
+  if (!state.boltTemplate) return;
+  if (!state.canShoot) return;
+  state.canShoot = false;
+  setTimeout(() => state.canShoot = true, 500);
+
+  AudioFx.shot();
+  AudioFx.ensure();
+
+  // Play crossbow animation
+  if (state.crossbowAction) {
+    state.crossbowAction.reset();
+    state.crossbowAction.play();
+  }
+
+  // Recoil
+  state.recoilVel -= 1.8 * state.recoilStrength;
+  state.cameraSwayVel.x += (Math.random() - 0.5) * 0.6 * state.recoilStrength;
+  state.cameraSwayVel.y += (Math.random() - 0.5) * 0.4 * state.recoilStrength;
+
+  // Muzzle flash
+  const fl = document.getElementById('flash');
+  fl.classList.add('on');
+  setTimeout(() => fl.classList.remove('on'), 70);
+
+  // Spawn bolt with the camera's current forward direction.
+  const bolt = state.boltTemplate.clone(true);
+  bolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
+  scene.add(bolt);
+
+  // Start position: a bit in front of the camera, slightly below center (muzzle).
+  const muzzleLocal = new THREE.Vector3(0.05, -0.05, -0.6);
+  const startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
+  bolt.position.copy(startPos);
+
+  // Direction: from start through the current aim point.
+  const aimWorld = getAimWorldPoint();
+  const dir = aimWorld.clone().sub(startPos).normalize();
+  bolt.lookAt(startPos.clone().add(dir));
+
+  state.shots++;
+  updateStats();
+
+  // Hit test: ray vs apple sphere.
+  let willHit = false;
+  let hitPoint = null;
+  if (state.appleAlive && state.appleHitbox) {
+    const oc = startPos.clone().sub(state.appleHitbox.center);
+    const b = oc.dot(dir);
+    const c = oc.dot(oc) - state.appleHitbox.radius * state.appleHitbox.radius;
+    const disc = b * b - c;
+    if (disc >= 0) {
+      const t = -b - Math.sqrt(disc);
+      if (t > 0) {
+        willHit = true;
+        hitPoint = startPos.clone().add(dir.clone().multiplyScalar(t));
+      }
+    }
+  }
+
+  state.bolts.push({
+    obj: bolt,
+    pos: startPos.clone(),
+    dir: dir.clone(),
+    speed: 26,
+    life: 2.5,
+    willHit,
+    hitPoint,
+    resolved: false,
+  });
+}
+
+function getAimWorldPoint() {
+  // Bolt goes along the camera's current forward — drunk drift is encoded in the camera rotation.
+  const v = new THREE.Vector3(0, 0, -8);
+  v.applyMatrix4(camera.matrixWorld);
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// Apple shatter
+// ---------------------------------------------------------------------------
+function shatterApple(impactPoint, impactDir) {
+  if (!state.apple) return;
+  const origin = state.apple.position.clone();
+  // Collect base meshes from the apple
+  const meshes = [];
+  state.apple.traverse(o => { if (o.isMesh) meshes.push(o); });
+
+  const NUM = 22;
+  for (let i = 0; i < NUM; i++) {
+    const src = meshes[i % meshes.length];
+    if (!src) break;
+    // Use a small chunk geometry — icosahedron pieces in the apple color.
+    let color = 0xc0392b;
+    if (src.material && src.material.color) color = src.material.color.getHex();
+    const size = 0.012 + Math.random() * 0.022;
+    const geom = i % 3 === 0
+      ? new THREE.IcosahedronGeometry(size, 0)
+      : (i % 3 === 1 ? new THREE.TetrahedronGeometry(size, 0) : new THREE.BoxGeometry(size, size, size));
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.6,
+      flatShading: true,
+    });
+    const piece = new THREE.Mesh(geom, mat);
+    piece.castShadow = true;
+    // Start near impact point with random scatter
+    piece.position.copy(origin).add(new THREE.Vector3(
+      (Math.random() - 0.5) * 0.08,
+      (Math.random() - 0.5) * 0.08,
+      (Math.random() - 0.5) * 0.08,
+    ));
+    // Velocity: outward from origin + bolt push + upward kick
+    const out = piece.position.clone().sub(origin).normalize();
+    const speed = 2 + Math.random() * 2.5;
+    const v = out.multiplyScalar(speed);
+    v.add(impactDir.clone().multiplyScalar(1.6 + Math.random()));
+    v.y += 1.5 + Math.random() * 1.5;
+    const angVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+    );
+    scene.add(piece);
+    state.fragments.push({ obj: piece, vel: v, ang: angVel, life: 2.2 });
+  }
+
+  // Juice spray — small bright particles
+  for (let i = 0; i < 14; i++) {
+    const drop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.008 + Math.random() * 0.008, 5, 5),
+      new THREE.MeshStandardMaterial({ color: 0xe24b4a, emissive: 0x661111, emissiveIntensity: 0.4 })
+    );
+    drop.position.copy(origin);
+    const v = new THREE.Vector3(
+      (Math.random() - 0.5) * 4,
+      Math.random() * 3 + 1.5,
+      (Math.random() - 0.5) * 4,
+    );
+    v.add(impactDir.clone().multiplyScalar(0.5));
+    scene.add(drop);
+    state.fragments.push({ obj: drop, vel: v, ang: new THREE.Vector3(), life: 1.6 });
+  }
+
+  scene.remove(state.apple);
+  state.apple = null;
+  state.appleAlive = false;
+}
+
+// ---------------------------------------------------------------------------
+// Loop
+// ---------------------------------------------------------------------------
+const clock = new THREE.Clock();
+function tick() {
+  const dt = Math.min(0.05, clock.getDelta());
+  state.t += dt;
+
+  // Drunk drift: smooth wandering toward mouse aim with low-freq noise.
+  const t = state.t;
+  const drift = state.drunk;
+  const noiseX = Math.sin(t * 0.9) * 0.35 + Math.sin(t * 2.3 + 1.2) * 0.18 + Math.sin(t * 0.4 + 0.7) * 0.45;
+  const noiseY = Math.cos(t * 0.8 + 0.5) * 0.32 + Math.sin(t * 1.7 + 2.4) * 0.2 + Math.cos(t * 0.35) * 0.4;
+  const targetX = state.aim.x * 0.45 + noiseX * drift * 0.4;
+  const targetY = state.aim.y * 0.4 + noiseY * drift * 0.3;
+  // Spring to target.
+  const sx = (targetX - state.aimSmooth.x) * 14;
+  const sy = (targetY - state.aimSmooth.y) * 14;
+  state.aimVel.x += sx * dt;
+  state.aimVel.y += sy * dt;
+  const damp = Math.exp(-state.damp * dt);
+  state.aimVel.multiplyScalar(damp);
+  state.aimSmooth.x += state.aimVel.x * dt;
+  state.aimSmooth.y += state.aimVel.y * dt;
+
+  // Camera sway — base oscillation + recoil impulse.
+  const baseSwayX = Math.sin(t * 0.7) * 0.015 * drift;
+  const baseSwayY = Math.cos(t * 0.55 + 1.1) * 0.012 * drift;
+  state.cameraSwayVel.x += -(state.cameraSway.x - baseSwayX) * 8 * dt;
+  state.cameraSwayVel.y += -(state.cameraSway.y - baseSwayY) * 8 * dt;
+  state.cameraSwayVel.multiplyScalar(Math.exp(-4 * dt));
+  state.cameraSway.x += state.cameraSwayVel.x * dt;
+  state.cameraSway.y += state.cameraSwayVel.y * dt;
+
+  // Recoil offset (vertical pitch kick)
+  state.recoilVel += -state.recoilOffset * 30 * dt;
+  state.recoilVel *= Math.exp(-6 * dt);
+  state.recoilOffset += state.recoilVel * dt;
+
+  // Apply to camera.
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = state.aimSmooth.x * 0.35 + state.cameraSway.x;
+  camera.rotation.x = state.aimSmooth.y * 0.28 + state.cameraSway.y + state.recoilOffset * 0.12;
+
+  // Animation mixer (crossbow shoot anim)
+  if (state.crossbowMixer) state.crossbowMixer.update(dt);
+
+  // Update bolts
+  for (const b of state.bolts) {
+    const step = b.dir.clone().multiplyScalar(b.speed * dt);
+    const next = b.pos.clone().add(step);
+    // Resolve hit if we cross the hit point.
+    if (b.willHit && !b.resolved && b.hitPoint) {
+      const before = b.pos.clone().sub(b.hitPoint).dot(b.dir);
+      const after = next.clone().sub(b.hitPoint).dot(b.dir);
+      if (before <= 0 && after >= 0) {
+        b.resolved = true;
+        b.obj.position.copy(b.hitPoint);
+        if (state.appleAlive) {
+          state.hits++; updateStats();
+          AudioFx.hit();
+          shatterApple(b.hitPoint, b.dir);
+        }
+        // Remove bolt shortly after impact.
+        b.life = 0.05;
+      }
+    }
+    b.pos.copy(next);
+    b.obj.position.copy(b.pos);
+    b.obj.lookAt(b.pos.clone().add(b.dir));
+    b.life -= dt;
+  }
+  // Miss sound: when an unresolved bolt's first life-second elapses without hit.
+  for (const b of state.bolts) {
+    if (!b.resolved && !b.missPlayed && b.life < 1.9) {
+      // Only play miss if we know we won't hit.
+      if (!b.willHit) {
+        AudioFx.miss();
+        b.missPlayed = true;
+      }
+    }
+  }
+  state.bolts = state.bolts.filter(b => {
+    if (b.life <= 0) { scene.remove(b.obj); return false; }
+    return true;
+  });
+
+  // Update fragments
+  for (const f of state.fragments) {
+    f.vel.y -= 9.8 * dt;
+    f.obj.position.addScaledVector(f.vel, dt);
+    f.obj.rotation.x += f.ang.x * dt;
+    f.obj.rotation.y += f.ang.y * dt;
+    f.obj.rotation.z += f.ang.z * dt;
+    // Bounce on the mug-top plane
+    const mugTopY = MUG_POS.y + 0.15;
+    if (f.obj.position.y < mugTopY && Math.abs(f.obj.position.x - MUG_POS.x) < 0.16 && Math.abs(f.obj.position.z - MUG_POS.z) < 0.16) {
+      f.obj.position.y = mugTopY;
+      f.vel.y = -f.vel.y * 0.3;
+      f.vel.x *= 0.7; f.vel.z *= 0.7;
+    }
+    // Ground
+    if (f.obj.position.y < 0.02) {
+      f.obj.position.y = 0.02;
+      f.vel.y = -f.vel.y * 0.25;
+      f.vel.x *= 0.6; f.vel.z *= 0.6;
+    }
+    f.life -= dt;
+  }
+  state.fragments = state.fragments.filter(f => {
+    if (f.life <= 0) {
+      // Fade by shrinking
+      f.obj.scale.multiplyScalar(0.9);
+      if (f.obj.scale.x < 0.05) { scene.remove(f.obj); return false; }
+    }
+    return true;
+  });
+
+  // Crosshair color: green if our aim ray actually intersects the apple.
+  const ch = document.getElementById('crosshair');
+  if (state.appleAlive && state.appleHitbox) {
+    const ndc = new THREE.Vector3(0, 0, 0.5);
+    const startPos = new THREE.Vector3();
+    camera.getWorldPosition(startPos);
+    const dir = new THREE.Vector3();
+    // Use exactly the same logic as the bolt: aim point - start.
+    const aimWorld = getAimWorldPoint();
+    dir.copy(aimWorld).sub(startPos).normalize();
+    const oc = startPos.clone().sub(state.appleHitbox.center);
+    const bd = oc.dot(dir);
+    const c = oc.dot(oc) - state.appleHitbox.radius * state.appleHitbox.radius;
+    const disc = bd * bd - c;
+    if (disc >= 0 && -bd - Math.sqrt(disc) > 0) ch.classList.add('on');
+    else ch.classList.remove('on');
+  } else {
+    ch.classList.remove('on');
+  }
+
+  // Soft fireplace flicker
+  fire.intensity = 3.6 + Math.sin(t * 9.0) * 0.6 + Math.sin(t * 17) * 0.3;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+boot().then(() => requestAnimationFrame(tick)).catch(err => {
+  console.error(err);
+  loadingLabel.textContent = 'Ошибка загрузки: ' + err.message;
+});
+</script>
+</body>
+</html>
