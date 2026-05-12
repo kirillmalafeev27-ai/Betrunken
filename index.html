@@ -444,6 +444,8 @@ const state = {
   crossbowMixer: null,
   crossbowAction: null,
   boltTemplate: null, // a clone-able bolt mesh extracted from the crossbow
+  idleBolts: [],      // bolt meshes attached to the crossbow, shown while loaded
+  idleBoltAnchor: null, // representative idle bolt used to compute muzzle origin
   drunk: 1.0,
   damp: 3.5,
   cameraDrift: 0.7,
@@ -669,9 +671,12 @@ async function boot() {
     if (candidate) boltCandidates.push(candidate);
   }
 
-  // Hide every pre-attached bolt in the in-scene crossbow — only the one we spawn
-  // on fire should be visible. We still keep `candidate` as the template for cloning.
-  for (const b of boltCandidates) b.visible = false;
+  // Keep the pre-attached bolt(s) visible while the crossbow is loaded. They get
+  // hidden in tryShoot() and restored ~1s later (reload cycle). `candidate` is
+  // still used as the template for the flying projectile clone.
+  state.idleBolts = boltCandidates.slice();
+  state.idleBoltAnchor = candidate || null;
+  for (const b of boltCandidates) b.visible = true;
 
   // Identify the bowstring so we can freeze it in its rest pose every frame.
   // The animation in this asset launches the string forward along with the bolt,
@@ -889,6 +894,15 @@ function tryShoot() {
   // Manual crossbow kick — replaces the broken built-in animation.
   state.crossbowKick = 1.0;
 
+  // Hide the bolt that sits on the crossbow rail, then restore it ~1s later so
+  // the weapon visibly "reloads".
+  if (state.idleBolts && state.idleBolts.length) {
+    for (const b of state.idleBolts) b.visible = false;
+    setTimeout(() => {
+      for (const b of state.idleBolts) b.visible = true;
+    }, 1000);
+  }
+
   // Recoil — kicks the camera pitch up and adds a small jitter.
   state.recoilVel -= 1.6 * state.recoilStrength;
   state.cameraSwayVel.x += (Math.random() - 0.5) * 0.4 * state.recoilStrength;
@@ -912,11 +926,19 @@ function tryShoot() {
   bolt.add(streak);
   scene.add(bolt);
 
-  // Start position: just past the front of the crossbow, on the bolt rail.
-  // Center it horizontally (x=0) so the projectile clearly emerges from in
-  // front of the player, not from the side of the screen.
-  const muzzleLocal = new THREE.Vector3(0.02, -0.08, -0.85);
-  const startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
+  // Start position: world-space center of the bolt that sits on the crossbow
+  // rail, so the projectile visually emerges from the middle of the weapon.
+  // Fallback to a hand-tuned offset if no idle bolt was found.
+  let startPos;
+  if (state.idleBoltAnchor) {
+    state.idleBoltAnchor.updateWorldMatrix(true, false);
+    const bb = new THREE.Box3().setFromObject(state.idleBoltAnchor);
+    startPos = new THREE.Vector3();
+    bb.getCenter(startPos);
+  } else {
+    const muzzleLocal = new THREE.Vector3(0.02, -0.08, -0.85);
+    startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
+  }
   bolt.position.copy(startPos);
 
   // Direction: from the muzzle along the camera's reticle ray. This way the bolt
