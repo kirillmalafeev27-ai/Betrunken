@@ -411,20 +411,19 @@ window_light.shadow.camera.near = 0.1;
 window_light.shadow.camera.far = 20;
 scene.add(window_light);
 
-// Spotlight aimed at the mug+apple so the target is always clearly visible.
-// Positions are derived from BASE_YAW so the cone always lands on the table
-// regardless of which corner of the room we end up facing.
-const targetSpot = new THREE.SpotLight(0xfff1d0, 8.0, 8, Math.PI / 6, 0.5, 1.0);
+// Spotlight aimed at the apple so the target is always clearly visible
+// against the dark barrel stack at the back of the tavern.
+const targetSpot = new THREE.SpotLight(0xfff1d0, 14.0, 18, Math.PI / 5, 0.5, 1.0);
 targetSpot.position.set(
-  camera.position.x + FORWARD_X * 1.8,
-  3.2,
-  camera.position.z + FORWARD_Z * 1.8
+  camera.position.x + FORWARD_X * 4.5,
+  3.6,
+  camera.position.z + FORWARD_Z * 4.5
 );
 const targetSpotTarget = new THREE.Object3D();
 targetSpotTarget.position.set(
-  camera.position.x + FORWARD_X * 3.0,
-  1.0,
-  camera.position.z + FORWARD_Z * 3.0
+  camera.position.x + FORWARD_X * 7.0,
+  1.45,
+  camera.position.z + FORWARD_Z * 7.0
 );
 scene.add(targetSpot);
 scene.add(targetSpotTarget);
@@ -824,95 +823,24 @@ async function boot() {
 }
 
 // ---------------------------------------------------------------------------
-// Trestle table + mug + apple (matches the reference image composition)
+// Apple target (sat on top of the barrels at the back of the tavern)
 // ---------------------------------------------------------------------------
-const TARGET_DIST = 3.0;             // distance in front of camera
-const TABLE_TOP_Y = 1.25;            // sawhorse plank height — chest height
-const MUG_BASE_Y  = TABLE_TOP_Y + 0.02;
-const MUG_HEIGHT  = 0.45;            // tall tankard so the apple ends up near eye level
-const APPLE_SIZE  = 0.12;            // small fruit perched on the mug
-const FOCUS_X     = -0.1;            // slight off-center, like the reference
+const TARGET_DIST = 7.0;             // horizontal distance to the barrels
+const APPLE_SIZE  = 0.12;            // small fruit perched on a barrel top
+const APPLE_Y     = 1.45;            // height of a stacked-barrel top (best guess)
+const FOCUS_X     = 0;
 
-function buildSawhorse() {
-  const wood = new THREE.MeshStandardMaterial({ color: 0xa37448, roughness: 0.88 });
-  const plank = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.06, 0.42), wood);
-  plank.position.y = TABLE_TOP_Y;
-  plank.castShadow = true; plank.receiveShadow = true;
-
-  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, TABLE_TOP_Y, 0.06), wood);
-  leg.castShadow = true; leg.receiveShadow = true;
-
-  const trestle = new THREE.Group();
-  // Two pairs of crossed legs
-  for (const xs of [-0.55, 0.55]) {
-    const l1 = leg.clone();
-    l1.position.set(xs - 0.12, TABLE_TOP_Y / 2 - 0.03, 0);
-    l1.rotation.z = 0.18;
-    const l2 = leg.clone();
-    l2.position.set(xs + 0.12, TABLE_TOP_Y / 2 - 0.03, 0);
-    l2.rotation.z = -0.18;
-    trestle.add(l1, l2);
-    const cross = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.05), wood);
-    cross.position.set(xs, TABLE_TOP_Y - 0.18, 0);
-    trestle.add(cross);
-  }
-  trestle.add(plank);
-  return trestle;
-}
-
-function buildMug() {
-  const mug = new THREE.Group();
-  const matWood = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 });
-  const matRim  = new THREE.MeshStandardMaterial({ color: 0x4a2f17, roughness: 0.85, metalness: 0.2 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.062, MUG_HEIGHT, 22), matWood);
-  body.position.y = MUG_HEIGHT / 2;
-  body.castShadow = true; body.receiveShadow = true;
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.008, 8, 22), matRim);
-  rim.position.y = MUG_HEIGHT - 0.005;
-  rim.rotation.x = Math.PI / 2;
-  const baseRing = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.008, 8, 22), matRim);
-  baseRing.position.y = 0.005;
-  baseRing.rotation.x = Math.PI / 2;
-  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 16, Math.PI), matWood);
-  handle.position.set(0.085, MUG_HEIGHT / 2, 0);
-  handle.rotation.y = Math.PI / 2;
-  const foam = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.073, 0.073, 0.015, 22),
-    new THREE.MeshStandardMaterial({ color: 0xf2e6c2, roughness: 0.65 })
-  );
-  foam.position.y = MUG_HEIGHT - 0.01;
-  mug.add(body, rim, baseRing, handle, foam);
-  mug.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return mug;
-}
-
-let SAWHORSE_POS;
-let MUG_POS;
 let APPLE_POS;
 
 function buildMugAndApple() {
-  // Anchor the whole composition relative to the camera's baseline gaze
-  // (BASE_YAW), so when we rotate the view toward a corner the target stays
-  // dead-ahead. FOCUS_X is applied along the camera's right vector.
+  // Place the apple at the barrel stack at the back of the tavern, along
+  // the camera's baseline gaze direction (FORWARD vector). No furniture —
+  // the apple just rests where the barrels are.
   const cx = camera.position.x;
   const cz = camera.position.z;
   const baseX = cx + FORWARD_X * TARGET_DIST + RIGHT_X * FOCUS_X;
   const baseZ = cz + FORWARD_Z * TARGET_DIST + RIGHT_Z * FOCUS_X;
-  SAWHORSE_POS = new THREE.Vector3(baseX, 0, baseZ);
-  MUG_POS      = new THREE.Vector3(baseX, MUG_BASE_Y, baseZ);
-  // Rest the apple on top of the foam — its bottom touches MUG top, so the
-  // center is exactly APPLE_SIZE / 2 above it.
-  APPLE_POS    = new THREE.Vector3(baseX, MUG_BASE_Y + MUG_HEIGHT + APPLE_SIZE * 0.5, baseZ);
-
-  const trestle = buildSawhorse();
-  trestle.position.copy(SAWHORSE_POS);
-  trestle.rotation.y = BASE_YAW;
-  scene.add(trestle);
-
-  const mug = buildMug();
-  mug.position.copy(MUG_POS);
-  scene.add(mug);
-  state.mug = mug;
+  APPLE_POS = new THREE.Vector3(baseX, APPLE_Y, baseZ);
 
   spawnApple();
 }
@@ -1267,15 +1195,6 @@ function tick() {
     f.obj.rotation.x += f.ang.x * dt;
     f.obj.rotation.y += f.ang.y * dt;
     f.obj.rotation.z += f.ang.z * dt;
-    // Bounce on the trestle plank
-    const plankY = TABLE_TOP_Y + 0.035;
-    if (f.obj.position.y < plankY
-        && Math.abs(f.obj.position.x - SAWHORSE_POS.x) < 0.7
-        && Math.abs(f.obj.position.z - SAWHORSE_POS.z) < 0.21) {
-      f.obj.position.y = plankY;
-      f.vel.y = -f.vel.y * 0.35;
-      f.vel.x *= 0.7; f.vel.z *= 0.7;
-    }
     // Ground
     if (f.obj.position.y < 0.02) {
       f.obj.position.y = 0.02;
