@@ -1001,14 +1001,15 @@ function shatterApple(impactPoint, impactDir) {
   const meshes = [];
   state.apple.traverse(o => { if (o.isMesh) meshes.push(o); });
 
-  const NUM = 22;
+  const NUM = 26;
   for (let i = 0; i < NUM; i++) {
     const src = meshes[i % meshes.length];
     if (!src) break;
     // Use a small chunk geometry — icosahedron pieces in the apple color.
     let color = 0xc0392b;
     if (src.material && src.material.color) color = src.material.color.getHex();
-    const size = 0.012 + Math.random() * 0.022;
+    // Pieces are sized so they read clearly at the barrel range (~7 m).
+    const size = 0.035 + Math.random() * 0.055;
     const geom = i % 3 === 0
       ? new THREE.IcosahedronGeometry(size, 0)
       : (i % 3 === 1 ? new THREE.TetrahedronGeometry(size, 0) : new THREE.BoxGeometry(size, size, size));
@@ -1040,11 +1041,11 @@ function shatterApple(impactPoint, impactDir) {
     state.fragments.push({ obj: piece, vel: v, ang: angVel, life: 2.2 });
   }
 
-  // Juice spray — small bright particles
-  for (let i = 0; i < 14; i++) {
+  // Juice spray — bright droplets (scaled up so they're visible at range).
+  for (let i = 0; i < 18; i++) {
     const drop = new THREE.Mesh(
-      new THREE.SphereGeometry(0.008 + Math.random() * 0.008, 5, 5),
-      new THREE.MeshStandardMaterial({ color: 0xe24b4a, emissive: 0x661111, emissiveIntensity: 0.4 })
+      new THREE.SphereGeometry(0.020 + Math.random() * 0.018, 6, 6),
+      new THREE.MeshStandardMaterial({ color: 0xe24b4a, emissive: 0x991717, emissiveIntensity: 0.7 })
     );
     drop.position.copy(origin);
     const v = new THREE.Vector3(
