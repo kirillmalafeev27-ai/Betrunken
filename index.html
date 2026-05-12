@@ -95,7 +95,6 @@
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 4;
-    will-change: left, top;
   }
   #crosshair .ring {
     position: absolute; inset: 0;
@@ -609,6 +608,12 @@ async function boot() {
   const crossbowRaw = crossbowGLB.scene;
   enableShadows(crossbowRaw);
 
+  // Log mesh names so we can identify parts (string, bolt, prod) if anything
+  // looks off in the asset.
+  const meshNames = [];
+  crossbowRaw.traverse(o => { if (o.isMesh) meshNames.push(o.name || '(unnamed)'); });
+  console.log('[crossbow] meshes:', meshNames);
+
   // Scale crossbow to a sensible first-person size.
   const cb = computeBBox(crossbowRaw);
   const cbScale = 0.55 / Math.max(cb.size.x, cb.size.y, cb.size.z);
@@ -627,18 +632,16 @@ async function boot() {
   scene.add(camera);
   state.crossbow = crossbowRig;
   state.crossbowInner = crossbowRaw;
+  state.crossbowRestPos = crossbowRig.position.clone();
+  state.crossbowRestRot = crossbowRig.rotation.clone();
+  state.crossbowKick = 0;
 
-  // Animation mixer for the built-in crossbow firing animation.
-  // We do NOT clamp at the end — once the firing loop completes, the action
-  // stops and the mesh returns to its bind (rest) pose. Without this the model
-  // got stuck at the last keyframe and parts of it (notably the string) wandered.
-  if (crossbowGLB.animations && crossbowGLB.animations.length) {
-    state.crossbowMixer = new THREE.AnimationMixer(crossbowRaw);
-    state.crossbowAction = state.crossbowMixer.clipAction(crossbowGLB.animations[0]);
-    state.crossbowAction.setLoop(THREE.LoopOnce, 1);
-    state.crossbowAction.clampWhenFinished = false;
-    state.crossbowClipDuration = crossbowGLB.animations[0].duration;
-  }
+  // NB: the asset's firing animation is intentionally NOT played. It launches
+  // the bowstring forward along with the bolt, which makes the string fly off
+  // into space when rendered without the bolt absorbing the motion. We deliver
+  // the firing feel via a manual translate-and-rotate kick on the rig (see the
+  // tick loop). The animation could be re-enabled later if we ever rebuild the
+  // string rig, but for now stability wins over the asset's anim.
 
   // Extract bolt mesh from the crossbow to use as projectile.
   let candidate = null;
@@ -883,19 +886,13 @@ function tryShoot() {
   AudioFx.shot();
   AudioFx.ensure();
 
-  // Play crossbow animation
-  if (state.crossbowAction) {
-    state.crossbowAction.reset();
-    state.crossbowAction.play();
-  }
+  // Manual crossbow kick — replaces the broken built-in animation.
+  state.crossbowKick = 1.0;
 
-  // Recoil — like the 2D sandbox: a strong upward kick to the aim (reticle),
-  // plus a small camera shake and pitch kick.
-  state.aimVel.y += 6.0 * state.recoilStrength;
-  state.aimVel.x += (Math.random() - 0.5) * 2.5 * state.recoilStrength;
-  state.recoilVel -= 1.2 * state.recoilStrength;
-  state.cameraSwayVel.x += (Math.random() - 0.5) * 0.3 * state.recoilStrength;
-  state.cameraSwayVel.y += (Math.random() - 0.5) * 0.2 * state.recoilStrength;
+  // Recoil — kicks the camera pitch up and adds a small jitter.
+  state.recoilVel -= 1.6 * state.recoilStrength;
+  state.cameraSwayVel.x += (Math.random() - 0.5) * 0.4 * state.recoilStrength;
+  state.cameraSwayVel.y += (Math.random() - 0.5) * 0.3 * state.recoilStrength;
 
   // Muzzle flash
   const fl = document.getElementById('flash');
@@ -961,8 +958,10 @@ function tryShoot() {
 
 const _raycaster = new THREE.Raycaster();
 function getAimRayDir() {
-  // Reticle-style aim: cast a ray from the camera through the on-screen reticle (NDC) position.
-  _raycaster.setFromCamera({ x: state.aimSmooth.x, y: state.aimSmooth.y }, camera);
+  // FPS-style aim: the crosshair is fixed at screen center, the camera carries
+  // both the mouse-driven yaw/pitch and the drunken drift. Casting at NDC (0,0)
+  // returns the camera's forward direction, which is what the bolt should follow.
+  _raycaster.setFromCamera({ x: 0, y: 0 }, camera);
   return _raycaster.ray.direction.clone();
 }
 
@@ -1045,77 +1044,71 @@ function tick() {
   const dt = Math.min(0.05, clock.getDelta());
   state.t += dt;
 
-  // Pointer-style drunk aim — exactly like the 2D sandbox:
-  // the reticle springs toward the mouse, with low-frequency noise pulling it off
-  // and a gentle re-centering spring. Output is `state.aimSmooth` in screen NDC
-  // (x right, y up, both in roughly [-1..1]).
+  // FPS-style camera aim, with the SIGN CORRECTED so mouse-right = look-right.
+  //
+  // In Three.js (right-handed, camera looks down -Z) positive yaw rotates the
+  // view to the LEFT — that's what made the previous build feel inverted.
+  // We negate the X-mouse mapping so a mouse drag to the right produces the
+  // negative yaw needed to look right.
+  //
+  // Drunken drift is a separate noise added on top of the mouse target, just
+  // like the 2D sandbox's cam.x/cam.y: it makes the world wobble even when
+  // the player holds the mouse perfectly still.
   const t = state.t;
   const drift = state.drunk;
-  const noiseX = Math.sin(t * 0.9) * 0.35 + Math.sin(t * 2.3 + 1.2) * 0.18 + Math.sin(t * 0.4 + 0.7) * 0.45;
-  const noiseY = Math.cos(t * 0.8 + 0.5) * 0.32 + Math.sin(t * 1.7 + 2.4) * 0.2 + Math.cos(t * 0.35) * 0.4;
-  const driftX = noiseX * drift * 0.45;
-  const driftY = noiseY * drift * 0.35;
-  // Spring toward mouse, plus a weak recenter pull, plus the noise drift.
-  const sx = (state.aim.x - state.aimSmooth.x) * 18 + driftX * 6 - state.aimSmooth.x * 1.0;
-  const sy = (state.aim.y - state.aimSmooth.y) * 18 + driftY * 6 - state.aimSmooth.y * 1.0;
-  state.aimVel.x += sx * dt;
-  state.aimVel.y += sy * dt;
+  const AIM_YAW   = 0.55;   // how many radians at mouse edges (~31°)
+  const AIM_PITCH = 0.40;   // ~23° max pitch
+  const camAimX = -state.aim.x * AIM_YAW;     // mouse right → yaw < 0 → look right ✓
+  const camAimY =  state.aim.y * AIM_PITCH;   // mouse up    → pitch > 0 → look up  ✓
+
+  // Slow drunken drift (low-freq noise, no mouse involvement)
+  const camNX = Math.sin(t * 0.55) * 0.55 + Math.sin(t * 1.3 + 1.1) * 0.30 + Math.cos(t * 0.32) * 0.25;
+  const camNY = Math.cos(t * 0.45 + 0.7) * 0.50 + Math.sin(t * 1.1 + 2.2) * 0.28 + Math.cos(t * 0.27) * 0.22;
+  const driftYaw   = camNX * state.cameraDrift * 0.20;
+  const driftPitch = camNY * state.cameraDrift * 0.12;
+
+  // Spring + damping into camera rotation. This produces the "lag" between the
+  // mouse and where the camera actually ends up — the drunk feel.
+  const targetYaw   = camAimX + driftYaw;
+  const targetPitch = camAimY + driftPitch;
+  state.aimVel.x += (targetYaw   - state.aimSmooth.x) * 16 * dt;
+  state.aimVel.y += (targetPitch - state.aimSmooth.y) * 16 * dt;
   const damp = Math.exp(-state.damp * dt);
   state.aimVel.multiplyScalar(damp);
   state.aimSmooth.x += state.aimVel.x * dt;
   state.aimSmooth.y += state.aimVel.y * dt;
 
-  // --- Drunken camera drift ---
-  // Independent of the mouse. Slow noise pushes the camera's yaw/pitch around,
-  // so the world wobbles in the player's view. The reticle stays under the mouse,
-  // but the bolt's world direction changes with the camera — exactly the 2D
-  // sandbox feel where the cam.x/cam.y offset made hitting harder even with
-  // a steady reticle.
-  const camNX = Math.sin(t * 0.55) * 0.55 + Math.sin(t * 1.3 + 1.1) * 0.30 + Math.cos(t * 0.32) * 0.25;
-  const camNY = Math.cos(t * 0.45 + 0.7) * 0.50 + Math.sin(t * 1.1 + 2.2) * 0.28 + Math.cos(t * 0.27) * 0.22;
-  const camTargetX = camNX * state.cameraDrift * 0.18;   // up to ~0.18 rad ≈ 10°
-  const camTargetY = camNY * state.cameraDrift * 0.10;   // up to ~0.10 rad ≈ 6°
-  state.cameraDriftVel.x += (camTargetX - state.cameraDriftRot.x) * 5 * dt;
-  state.cameraDriftVel.y += (camTargetY - state.cameraDriftRot.y) * 5 * dt;
-  state.cameraDriftVel.multiplyScalar(Math.exp(-2.5 * dt));
-  state.cameraDriftRot.x += state.cameraDriftVel.x * dt;
-  state.cameraDriftRot.y += state.cameraDriftVel.y * dt;
-
-  // Fast micro-jitter on top so it feels "tipsy", not just slow.
-  const baseSwayX = Math.sin(t * 4.1) * 0.005 * drift;
-  const baseSwayY = Math.cos(t * 3.7 + 0.5) * 0.004 * drift;
+  // Fast micro-jitter on top — "tipsy" feel.
+  const baseSwayX = Math.sin(t * 4.1) * 0.006 * drift;
+  const baseSwayY = Math.cos(t * 3.7 + 0.5) * 0.005 * drift;
   state.cameraSwayVel.x += -(state.cameraSway.x - baseSwayX) * 18 * dt;
   state.cameraSwayVel.y += -(state.cameraSway.y - baseSwayY) * 18 * dt;
   state.cameraSwayVel.multiplyScalar(Math.exp(-5 * dt));
   state.cameraSway.x += state.cameraSwayVel.x * dt;
   state.cameraSway.y += state.cameraSwayVel.y * dt;
 
-  // Recoil: vertical kick that decays back to zero.
+  // Recoil pitch kick (decays back to zero).
   state.recoilVel += -state.recoilOffset * 30 * dt;
   state.recoilVel *= Math.exp(-6 * dt);
   state.recoilOffset += state.recoilVel * dt;
 
-  // Apply rotations to the camera (NOT driven by the mouse — that goes to the reticle).
-  camera.rotation.y = state.cameraDriftRot.x + state.cameraSway.x;
-  camera.rotation.x = BASE_PITCH + state.cameraDriftRot.y + state.cameraSway.y + state.recoilOffset * 0.10;
+  // Compose final camera orientation.
+  camera.rotation.y = state.aimSmooth.x + state.cameraSway.x;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10;
 
-  // Position the crosshair element at the aim screen position.
-  const chEl = document.getElementById('crosshair');
-  const cx = (state.aimSmooth.x * 0.5 + 0.5) * window.innerWidth;
-  const cy = (-state.aimSmooth.y * 0.5 + 0.5) * window.innerHeight;
-  chEl.style.left = cx + 'px';
-  chEl.style.top  = cy + 'px';
-
-  // Animation mixer (crossbow shoot anim) + string freeze so the bowstring
-  // doesn't fly off when the firing keyframes drive it past the prod.
-  if (state.crossbowMixer) {
-    state.crossbowMixer.update(dt);
-    if (state.stringMesh && state.stringRest) {
-      state.stringMesh.position.copy(state.stringRest.position);
-      state.stringMesh.quaternion.copy(state.stringRest.quaternion);
-      state.stringMesh.scale.copy(state.stringRest.scale);
-    }
+  // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
+  if (state.crossbowKick > 0) {
+    state.crossbowKick = Math.max(0, state.crossbowKick - dt * 4.0);
+    const k = state.crossbowKick;
+    state.crossbow.position.z = state.crossbowRestPos.z + 0.08 * k;
+    state.crossbow.rotation.x = state.crossbowRestRot.x - 0.18 * k;
   }
+
+  // The asset's built-in firing animation moves the bowstring forward along
+  // with the bolt (the string visibly "flies into space"). We intentionally
+  // don't run the mixer — the model stays in its bind/rest pose with the
+  // string in place, and the firing feel is delivered by `state.crossbowKick`
+  // above (a manual translate-back-and-rotate kick on the rig).
 
   // Update bolts
   for (const b of state.bolts) {
