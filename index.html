@@ -173,6 +173,11 @@
       <span class="val" id="s-damp-v">3.5</span>
     </div>
     <div class="ctl">
+      <label>Дрейф камеры</label>
+      <input id="s-cam" type="range" min="0" max="2" step="0.05" value="0.7">
+      <span class="val" id="s-cam-v">0.70</span>
+    </div>
+    <div class="ctl">
       <label>Отдача</label>
       <input id="s-recoil" type="range" min="0" max="2" step="0.05" value="0.7">
       <span class="val" id="s-recoil-v">0.70</span>
@@ -442,7 +447,12 @@ const state = {
   boltTemplate: null, // a clone-able bolt mesh extracted from the crossbow
   drunk: 1.0,
   damp: 3.5,
+  cameraDrift: 0.7,
   recoilStrength: 0.7,
+  cameraDriftRot: new THREE.Vector2(0, 0),
+  cameraDriftVel: new THREE.Vector2(0, 0),
+  stringMesh: null,
+  stringRest: null,
   aim: new THREE.Vector2(0, 0),   // [-1..1] target pos on screen
   aimSmooth: new THREE.Vector2(0, 0),
   aimVel: new THREE.Vector2(0, 0),
@@ -466,6 +476,7 @@ function bindSlider(id, key, fmt) {
 }
 bindSlider('drunk', 'drunk', v => v.toFixed(2));
 bindSlider('damp', 'damp', v => v.toFixed(1));
+bindSlider('cam', 'cameraDrift', v => v.toFixed(2));
 bindSlider('recoil', 'recoilStrength', v => v.toFixed(2));
 
 function updateStats() {
@@ -618,20 +629,26 @@ async function boot() {
   state.crossbowInner = crossbowRaw;
 
   // Animation mixer for the built-in crossbow firing animation.
+  // We do NOT clamp at the end — once the firing loop completes, the action
+  // stops and the mesh returns to its bind (rest) pose. Without this the model
+  // got stuck at the last keyframe and parts of it (notably the string) wandered.
   if (crossbowGLB.animations && crossbowGLB.animations.length) {
     state.crossbowMixer = new THREE.AnimationMixer(crossbowRaw);
     state.crossbowAction = state.crossbowMixer.clipAction(crossbowGLB.animations[0]);
     state.crossbowAction.setLoop(THREE.LoopOnce, 1);
-    state.crossbowAction.clampWhenFinished = true;
+    state.crossbowAction.clampWhenFinished = false;
+    state.crossbowClipDuration = crossbowGLB.animations[0].duration;
   }
 
   // Extract bolt mesh from the crossbow to use as projectile.
   let candidate = null;
+  const boltCandidates = [];
   crossbowRaw.traverse(o => {
     if (!o.isMesh) return;
     const n = (o.name || '').toLowerCase();
     if (n.includes('bolt') || n.includes('arrow') || n.includes('quarrel')) {
-      candidate = o;
+      boltCandidates.push(o);
+      if (!candidate) candidate = o;
     }
   });
   if (!candidate) {
@@ -646,7 +663,32 @@ async function boot() {
       if (ratio > bestRatio && longest > 0.05) { bestRatio = ratio; best = o; }
     });
     candidate = best;
+    if (candidate) boltCandidates.push(candidate);
   }
+
+  // Hide every pre-attached bolt in the in-scene crossbow — only the one we spawn
+  // on fire should be visible. We still keep `candidate` as the template for cloning.
+  for (const b of boltCandidates) b.visible = false;
+
+  // Identify the bowstring so we can freeze it in its rest pose every frame.
+  // The animation in this asset launches the string forward along with the bolt,
+  // which makes the string appear to "fly into space" once it leaves the prod.
+  crossbowRaw.traverse(o => {
+    if (!o.isMesh) return;
+    const n = (o.name || '').toLowerCase();
+    if (n.includes('string') || n.includes('chord') || n.includes('cord')
+        || n.includes('strung') || n.includes('rope') || n.includes('wire')
+        || n.includes('тетив') || n.includes('tetiv')) {
+      if (!state.stringMesh) {
+        state.stringMesh = o;
+        state.stringRest = {
+          position: o.position.clone(),
+          quaternion: o.quaternion.clone(),
+          scale: o.scale.clone(),
+        };
+      }
+    }
+  });
 
   // Build the bolt template as TWO nested groups so lookAt at fire time doesn't
   // erase our pre-rotation that aligns the bolt's long axis with -Z.
@@ -873,8 +915,10 @@ function tryShoot() {
   bolt.add(streak);
   scene.add(bolt);
 
-  // Start position: at the crossbow muzzle, in front of the camera.
-  const muzzleLocal = new THREE.Vector3(0.10, -0.10, -0.75);
+  // Start position: just past the front of the crossbow, on the bolt rail.
+  // Center it horizontally (x=0) so the projectile clearly emerges from in
+  // front of the player, not from the side of the screen.
+  const muzzleLocal = new THREE.Vector3(0.02, -0.08, -0.85);
   const startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
   bolt.position.copy(startPos);
 
@@ -1021,13 +1065,28 @@ function tick() {
   state.aimSmooth.x += state.aimVel.x * dt;
   state.aimSmooth.y += state.aimVel.y * dt;
 
-  // Subtle camera sway in world space — the player's view wobbles a bit from being drunk,
-  // but it does NOT track the mouse. Only the reticle does.
-  const baseSwayX = Math.sin(t * 0.7) * 0.012 * drift;
-  const baseSwayY = Math.cos(t * 0.55 + 1.1) * 0.010 * drift;
-  state.cameraSwayVel.x += -(state.cameraSway.x - baseSwayX) * 8 * dt;
-  state.cameraSwayVel.y += -(state.cameraSway.y - baseSwayY) * 8 * dt;
-  state.cameraSwayVel.multiplyScalar(Math.exp(-4 * dt));
+  // --- Drunken camera drift ---
+  // Independent of the mouse. Slow noise pushes the camera's yaw/pitch around,
+  // so the world wobbles in the player's view. The reticle stays under the mouse,
+  // but the bolt's world direction changes with the camera — exactly the 2D
+  // sandbox feel where the cam.x/cam.y offset made hitting harder even with
+  // a steady reticle.
+  const camNX = Math.sin(t * 0.55) * 0.55 + Math.sin(t * 1.3 + 1.1) * 0.30 + Math.cos(t * 0.32) * 0.25;
+  const camNY = Math.cos(t * 0.45 + 0.7) * 0.50 + Math.sin(t * 1.1 + 2.2) * 0.28 + Math.cos(t * 0.27) * 0.22;
+  const camTargetX = camNX * state.cameraDrift * 0.18;   // up to ~0.18 rad ≈ 10°
+  const camTargetY = camNY * state.cameraDrift * 0.10;   // up to ~0.10 rad ≈ 6°
+  state.cameraDriftVel.x += (camTargetX - state.cameraDriftRot.x) * 5 * dt;
+  state.cameraDriftVel.y += (camTargetY - state.cameraDriftRot.y) * 5 * dt;
+  state.cameraDriftVel.multiplyScalar(Math.exp(-2.5 * dt));
+  state.cameraDriftRot.x += state.cameraDriftVel.x * dt;
+  state.cameraDriftRot.y += state.cameraDriftVel.y * dt;
+
+  // Fast micro-jitter on top so it feels "tipsy", not just slow.
+  const baseSwayX = Math.sin(t * 4.1) * 0.005 * drift;
+  const baseSwayY = Math.cos(t * 3.7 + 0.5) * 0.004 * drift;
+  state.cameraSwayVel.x += -(state.cameraSway.x - baseSwayX) * 18 * dt;
+  state.cameraSwayVel.y += -(state.cameraSway.y - baseSwayY) * 18 * dt;
+  state.cameraSwayVel.multiplyScalar(Math.exp(-5 * dt));
   state.cameraSway.x += state.cameraSwayVel.x * dt;
   state.cameraSway.y += state.cameraSwayVel.y * dt;
 
@@ -1036,10 +1095,9 @@ function tick() {
   state.recoilVel *= Math.exp(-6 * dt);
   state.recoilOffset += state.recoilVel * dt;
 
-  // Camera orientation: fixed base pitch + small drunk sway + recoil kick.
-  // Aim does NOT rotate the camera — it only moves the reticle on screen.
-  camera.rotation.y = state.cameraSway.x;
-  camera.rotation.x = BASE_PITCH + state.cameraSway.y + state.recoilOffset * 0.10;
+  // Apply rotations to the camera (NOT driven by the mouse — that goes to the reticle).
+  camera.rotation.y = state.cameraDriftRot.x + state.cameraSway.x;
+  camera.rotation.x = BASE_PITCH + state.cameraDriftRot.y + state.cameraSway.y + state.recoilOffset * 0.10;
 
   // Position the crosshair element at the aim screen position.
   const chEl = document.getElementById('crosshair');
@@ -1048,8 +1106,16 @@ function tick() {
   chEl.style.left = cx + 'px';
   chEl.style.top  = cy + 'px';
 
-  // Animation mixer (crossbow shoot anim)
-  if (state.crossbowMixer) state.crossbowMixer.update(dt);
+  // Animation mixer (crossbow shoot anim) + string freeze so the bowstring
+  // doesn't fly off when the firing keyframes drive it past the prod.
+  if (state.crossbowMixer) {
+    state.crossbowMixer.update(dt);
+    if (state.stringMesh && state.stringRest) {
+      state.stringMesh.position.copy(state.stringRest.position);
+      state.stringMesh.quaternion.copy(state.stringRest.quaternion);
+      state.stringMesh.scale.copy(state.stringRest.scale);
+    }
+  }
 
   // Update bolts
   for (const b of state.bolts) {
