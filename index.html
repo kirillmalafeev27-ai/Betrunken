@@ -747,15 +747,15 @@ async function boot() {
   outerBoltGroup.add(innerBoltGroup);
   state.boltTemplate = outerBoltGroup;
 
-  // Mount a single idle bolt on the crossbow itself, lying along the middle
-  // of the rail. crossbowAligned's local origin sits at the crossbow's bbox
-  // center with -Z pointing forward along the rail, so position (0, dy, 0)
-  // places the bolt right on the centerline. `dy` lifts it off the stock so
-  // it visually rests on top of the rail rather than clipping through it.
+  // Mount a single idle bolt on the crossbow rig. The rig's local axes match
+  // the camera (-Z = forward along the rail, +Y = world up, +X = right), so
+  // (0, dy, dz) places the bolt right on the centerline of the rail. `dy`
+  // lifts it onto the rail surface, `dz` slides it forward toward the bow so
+  // it sits where a loaded bolt would actually rest.
   const idleBolt = state.boltTemplate.clone(true);
   idleBolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
-  idleBolt.position.set(0, 0.045, 0);
-  crossbowAligned.add(idleBolt);
+  idleBolt.position.set(0, 0.05, -0.05);
+  crossbowRig.add(idleBolt);
   state.idleBolt = idleBolt;
 
   loadingLabel.textContent = 'Загрузка яблока…';
