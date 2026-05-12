@@ -699,7 +699,10 @@ async function boot() {
   let innerBoltGroup;
   if (candidate) {
     const bolt = candidate.clone(true);
-    bolt.traverse(o => { if (o.isMesh) { o.castShadow = true; o.material = o.material.clone(); } });
+    // `candidate` was hidden above to suppress the in-model bolts; the clone
+    // inherits visible=false, so we have to restore it on every node.
+    bolt.visible = true;
+    bolt.traverse(o => { o.visible = true; if (o.isMesh) { o.castShadow = true; o.material = o.material.clone(); } });
     // Reset any local transform so bbox reflects pure geometry orientation.
     bolt.position.set(0, 0, 0);
     bolt.rotation.set(0, 0, 0);
