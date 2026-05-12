@@ -784,10 +784,11 @@ async function boot() {
   // visually on the middle of the rail.
   const idleBolt = state.boltTemplate.clone(true);
   idleBolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
-  // World pos ≈ (-0.12, -0.10, -0.70): a touch left of screen center and
-  // lifted off the stock so it visibly sits above the rail surface, with
-  // the fletching forward of the camera so it doesn't poke into view.
-  idleBolt.position.set(-0.22, 0.08, -0.15);
+  // World pos ≈ (-0.12, -0.10, -0.60): a touch left of screen center,
+  // lifted off the stock, and pulled back toward the bowstring so the
+  // bolt's nock visibly sits against the string instead of floating
+  // halfway down the rail.
+  idleBolt.position.set(-0.22, 0.08, -0.05);
   // The bolt template's tip sits at local +Z (because Object3D.lookAt aims
   // +Z at the flight target). The rig's forward is -Z, so without this
   // flip the tip would point back at the player.
