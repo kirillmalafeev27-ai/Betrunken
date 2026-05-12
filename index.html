@@ -784,10 +784,10 @@ async function boot() {
   // visually on the middle of the rail.
   const idleBolt = state.boltTemplate.clone(true);
   idleBolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
-  // World pos ≈ (-0.08, -0.13, -0.70): nudged to the left of screen center
-  // (still on the rail), resting on top of the stock, fletching forward of
-  // the camera so it doesn't poke into the viewer's face.
-  idleBolt.position.set(-0.18, 0.05, -0.15);
+  // World pos ≈ (-0.12, -0.10, -0.70): a touch left of screen center and
+  // lifted off the stock so it visibly sits above the rail surface, with
+  // the fletching forward of the camera so it doesn't poke into view.
+  idleBolt.position.set(-0.22, 0.08, -0.15);
   // The bolt template's tip sits at local +Z (because Object3D.lookAt aims
   // +Z at the flight target). The rig's forward is -Z, so without this
   // flip the tip would point back at the player.
@@ -992,14 +992,20 @@ function tryShoot() {
   }
   bolt.position.copy(startPos);
 
-  // Direction: from the MUZZLE to the point the reticle is looking at, NOT
-  // simply the camera's forward vector. Because the muzzle sits a few cm
-  // below/left of the camera, using camera forward causes parallax — the
-  // bolt arrives below the crosshair at target range. Pick a far point along
-  // the camera's aim ray and aim the muzzle at it so the bolt converges on
-  // wherever the crosshair is pointing.
+  // Direction: from the MUZZLE to the point the reticle is on, NOT simply
+  // the camera's forward vector. Because the muzzle sits below/left of the
+  // camera, firing parallel to the line of sight causes parallax — the
+  // bolt arrives below the crosshair at any finite range. Converge the
+  // trajectory at the actual target distance (closest point on the camera
+  // ray to the apple, or a sensible default if there's no apple) so the
+  // bolt passes exactly through the reticle at the target.
   const aimDir = getAimRayDir();
-  const aimPoint = camera.position.clone().add(aimDir.multiplyScalar(50));
+  let convergeDist = 5.0;
+  if (state.appleHitbox) {
+    const toApple = state.appleHitbox.center.clone().sub(camera.position);
+    convergeDist = Math.max(1.5, toApple.dot(aimDir));
+  }
+  const aimPoint = camera.position.clone().add(aimDir.clone().multiplyScalar(convergeDist));
   const dir = aimPoint.clone().sub(startPos).normalize();
   bolt.lookAt(startPos.clone().add(dir));
 
@@ -1166,20 +1172,22 @@ function tick() {
   state.recoilOffset += state.recoilVel * dt;
 
   // Drunken POSITIONAL sway — the player's body shifts on his feet because
-  // his vestibular system is fried, so his eyes wander a few centimetres
-  // around the anchor point even when he stands still. Independent low-freq
-  // noise per axis; scaled by state.cameraDrift (the "дрейф камеры" slider).
-  const swayX = Math.sin(t * 0.43)       * 0.6
-              + Math.cos(t * 0.91 + 1.3) * 0.3
-              + Math.sin(t * 1.7  + 2.4) * 0.15;
-  const swayZ = Math.cos(t * 0.37 + 0.8) * 0.6
-              + Math.sin(t * 0.83 + 2.1) * 0.3
-              + Math.cos(t * 1.6  + 0.4) * 0.15;
-  const swayY = Math.sin(t * 0.62 + 2.0) * 0.4
-              + Math.cos(t * 1.21 + 0.9) * 0.2;
-  camera.position.x = CAMERA_BASE_POS.x + swayX * state.cameraDrift * 0.06;
-  camera.position.z = CAMERA_BASE_POS.z + swayZ * state.cameraDrift * 0.06;
-  camera.position.y = CAMERA_BASE_POS.y + swayY * state.cameraDrift * 0.03;
+  // his vestibular system is fried, so his eyes wander around the anchor
+  // point even when he stands still. Independent multi-octave noise per
+  // axis; scaled by state.cameraDrift. At max (slider=2) this swings
+  // roughly ±30 cm side-to-side with ~5-second primary period, which
+  // reads clearly as a body sway without being nauseating.
+  const swayX = Math.sin(t * 1.10)        * 0.6
+              + Math.cos(t * 2.30 + 1.3)  * 0.3
+              + Math.sin(t * 4.70 + 2.4)  * 0.15;
+  const swayZ = Math.cos(t * 0.95 + 0.8)  * 0.6
+              + Math.sin(t * 2.10 + 2.1)  * 0.3
+              + Math.cos(t * 4.10 + 0.4)  * 0.15;
+  const swayY = Math.sin(t * 1.60 + 2.0)  * 0.4
+              + Math.cos(t * 3.10 + 0.9)  * 0.2;
+  camera.position.x = CAMERA_BASE_POS.x + swayX * state.cameraDrift * 0.15;
+  camera.position.z = CAMERA_BASE_POS.z + swayZ * state.cameraDrift * 0.15;
+  camera.position.y = CAMERA_BASE_POS.y + swayY * state.cameraDrift * 0.07;
 
   // Compose final camera orientation.
   camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x;
