@@ -91,7 +91,7 @@
 
   #crosshair {
     position: absolute; top: 50%; left: 50%;
-    width: 64px; height: 64px;
+    width: 96px; height: 96px;
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 4;
@@ -221,6 +221,7 @@
     <div class="ctl">
       <button id="reset">Сброс</button>
       <button id="respawn">Новое яблоко</button>
+      <button id="open-spawn-editor">Спавны</button>
     </div>
   </div>
 
@@ -243,7 +244,7 @@
       <div class="list" id="se-list"></div>
       <div class="actions">
         <button id="se-clear" class="secondary">Очистить</button>
-        <button id="se-start" class="primary">Начать игру</button>
+        <button id="se-start" class="primary">Закрыть</button>
       </div>
     </div>
   </div>
@@ -872,14 +873,16 @@ async function boot() {
   enableShadows(state.appleTemplate);
 
   loadSpawnsFromStorage();
+  spawnApple();
 
   document.getElementById('loading').style.display = 'none';
-  openSpawnEditor();
+  document.getElementById('start').style.display = 'flex';
 
   document.getElementById('start-btn').addEventListener('click', () => {
     AudioFx.ensure();
     document.getElementById('start').style.display = 'none';
   });
+  document.getElementById('open-spawn-editor').addEventListener('click', openSpawnEditor);
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,8 +1068,8 @@ function openSpawnEditor() {
     });
     document.getElementById('se-start').addEventListener('click', () => {
       closeSpawnEditor();
-      spawnApple();
-      document.getElementById('start').style.display = 'flex';
+      // Re-roll the live apple onto one of the (possibly edited) spawns.
+      respawnApple();
     });
   }
 }
