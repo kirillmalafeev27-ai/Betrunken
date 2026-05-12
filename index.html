@@ -750,14 +750,18 @@ async function boot() {
   outerBoltGroup.add(innerBoltGroup);
   state.boltTemplate = outerBoltGroup;
 
-  // Mount a single idle bolt on the crossbow rig. The rig's local axes match
-  // the camera (-Z = forward along the rail, +Y = world up, +X = right), so
-  // (0, dy, dz) places the bolt right on the centerline of the rail. `dy`
-  // lifts it onto the rail surface, `dz` slides it forward toward the bow so
-  // it sits where a loaded bolt would actually rest.
+  // Mount a single idle bolt on the crossbow rig. The rig sits at
+  // (0.10, -0.18, -0.55) relative to the camera (offset to the lower-right
+  // so the crossbow reads as held in the hands), and the model's bbox
+  // center is pulled off the rail by the wide prod arms. We place the bolt
+  // in rig-local space such that, after the rig offset, it ends up roughly
+  // centered horizontally on screen and just below the crosshair — i.e.
+  // visually on the middle of the rail.
   const idleBolt = state.boltTemplate.clone(true);
   idleBolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
-  idleBolt.position.set(0, 0.05, -0.05);
+  // World pos ≈ (0, -0.05, -0.60): centered horizontally, slightly below
+  // the reticle, ~60cm in front of the camera.
+  idleBolt.position.set(-0.10, 0.13, -0.05);
   crossbowRig.add(idleBolt);
   state.idleBolt = idleBolt;
 
