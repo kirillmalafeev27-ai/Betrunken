@@ -422,7 +422,7 @@ targetSpot.position.set(
 const targetSpotTarget = new THREE.Object3D();
 targetSpotTarget.position.set(
   camera.position.x + FORWARD_X * 7.0,
-  1.45,
+  1.85,
   camera.position.z + FORWARD_Z * 7.0
 );
 scene.add(targetSpot);
@@ -827,7 +827,7 @@ async function boot() {
 // ---------------------------------------------------------------------------
 const TARGET_DIST = 7.0;             // horizontal distance to the barrels
 const APPLE_SIZE  = 0.12;            // small fruit perched on a barrel top
-const APPLE_Y     = 1.45;            // height of a stacked-barrel top (best guess)
+const APPLE_Y     = 1.85;            // raised above the barrel top
 const FOCUS_X     = 0;
 
 let APPLE_POS;
