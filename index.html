@@ -355,6 +355,9 @@ scene.fog = new THREE.Fog(0x1a1611, 12, 28);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.position.set(0, 1.55, 0);
+// Anchor for the drunken positional sway: each frame the camera is offset
+// from this base by low-frequency noise scaled by state.cameraDrift.
+const CAMERA_BASE_POS = camera.position.clone();
 // Camera is essentially static. A small base pitch puts the mug+apple near screen center.
 // BASE_YAW rotates the view toward a corner of the tavern so the player sees
 // two walls meeting in the background instead of a head-on flat wall.
@@ -781,10 +784,10 @@ async function boot() {
   // visually on the middle of the rail.
   const idleBolt = state.boltTemplate.clone(true);
   idleBolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
-  // World pos ≈ (0, -0.13, -0.70): centered horizontally, resting on top
-  // of the rail with a touch of clearance so it doesn't sink into the
-  // stock, and pushed forward so the fletching isn't in the camera's face.
-  idleBolt.position.set(-0.10, 0.05, -0.15);
+  // World pos ≈ (-0.08, -0.13, -0.70): nudged to the left of screen center
+  // (still on the rail), resting on top of the stock, fletching forward of
+  // the camera so it doesn't poke into the viewer's face.
+  idleBolt.position.set(-0.18, 0.05, -0.15);
   // The bolt template's tip sits at local +Z (because Object3D.lookAt aims
   // +Z at the flight target). The rig's forward is -Z, so without this
   // flip the tip would point back at the player.
@@ -989,9 +992,15 @@ function tryShoot() {
   }
   bolt.position.copy(startPos);
 
-  // Direction: from the muzzle along the camera's reticle ray. This way the bolt
-  // really goes wherever the drunken crosshair is pointing.
-  const dir = getAimRayDir();
+  // Direction: from the MUZZLE to the point the reticle is looking at, NOT
+  // simply the camera's forward vector. Because the muzzle sits a few cm
+  // below/left of the camera, using camera forward causes parallax — the
+  // bolt arrives below the crosshair at target range. Pick a far point along
+  // the camera's aim ray and aim the muzzle at it so the bolt converges on
+  // wherever the crosshair is pointing.
+  const aimDir = getAimRayDir();
+  const aimPoint = camera.position.clone().add(aimDir.multiplyScalar(50));
+  const dir = aimPoint.clone().sub(startPos).normalize();
   bolt.lookAt(startPos.clone().add(dir));
 
   state.shots++;
@@ -1131,16 +1140,10 @@ function tick() {
   const camAimX = -state.aim.x * AIM_YAW;     // mouse right → yaw < 0 → look right ✓
   const camAimY =  state.aim.y * AIM_PITCH;   // mouse up    → pitch > 0 → look up  ✓
 
-  // Slow drunken drift (low-freq noise, no mouse involvement)
-  const camNX = Math.sin(t * 0.55) * 0.55 + Math.sin(t * 1.3 + 1.1) * 0.30 + Math.cos(t * 0.32) * 0.25;
-  const camNY = Math.cos(t * 0.45 + 0.7) * 0.50 + Math.sin(t * 1.1 + 2.2) * 0.28 + Math.cos(t * 0.27) * 0.22;
-  const driftYaw   = camNX * state.cameraDrift * 0.20;
-  const driftPitch = camNY * state.cameraDrift * 0.12;
-
   // Spring + damping into camera rotation. This produces the "lag" between the
   // mouse and where the camera actually ends up — the drunk feel.
-  const targetYaw   = camAimX + driftYaw;
-  const targetPitch = camAimY + driftPitch;
+  const targetYaw   = camAimX;
+  const targetPitch = camAimY;
   state.aimVel.x += (targetYaw   - state.aimSmooth.x) * 16 * dt;
   state.aimVel.y += (targetPitch - state.aimSmooth.y) * 16 * dt;
   const damp = Math.exp(-state.damp * dt);
@@ -1161,6 +1164,22 @@ function tick() {
   state.recoilVel += -state.recoilOffset * 30 * dt;
   state.recoilVel *= Math.exp(-6 * dt);
   state.recoilOffset += state.recoilVel * dt;
+
+  // Drunken POSITIONAL sway — the player's body shifts on his feet because
+  // his vestibular system is fried, so his eyes wander a few centimetres
+  // around the anchor point even when he stands still. Independent low-freq
+  // noise per axis; scaled by state.cameraDrift (the "дрейф камеры" slider).
+  const swayX = Math.sin(t * 0.43)       * 0.6
+              + Math.cos(t * 0.91 + 1.3) * 0.3
+              + Math.sin(t * 1.7  + 2.4) * 0.15;
+  const swayZ = Math.cos(t * 0.37 + 0.8) * 0.6
+              + Math.sin(t * 0.83 + 2.1) * 0.3
+              + Math.cos(t * 1.6  + 0.4) * 0.15;
+  const swayY = Math.sin(t * 0.62 + 2.0) * 0.4
+              + Math.cos(t * 1.21 + 0.9) * 0.2;
+  camera.position.x = CAMERA_BASE_POS.x + swayX * state.cameraDrift * 0.06;
+  camera.position.z = CAMERA_BASE_POS.z + swayZ * state.cameraDrift * 0.06;
+  camera.position.y = CAMERA_BASE_POS.y + swayY * state.cameraDrift * 0.03;
 
   // Compose final camera orientation.
   camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x;
