@@ -14,9 +14,9 @@
     --accent: #c89060;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
-  #app { position: fixed; inset: 0; }
-  canvas { display: block; width: 100%; height: 100%; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; cursor: none; }
+  #app { position: fixed; inset: 0; cursor: none; }
+  canvas { display: block; width: 100%; height: 100%; cursor: none; }
 
   #hud {
     position: absolute; top: 0; left: 0; right: 0;
@@ -1329,9 +1329,15 @@ function tick() {
   // the player holds the mouse perfectly still.
   const t = state.t;
   const drift = state.drunk;
-  const AIM_YAW   = 0.55;   // how many radians at mouse edges (~31°)
+  // Asymmetric yaw: leftward pan is clamped near the right edge of the
+  // fireplace (which sits around world x≈-2 from the camera), so the view
+  // can't drift off the scene on that side.
+  const AIM_YAW_LEFT  = 0.22;   // max additional yaw when looking left
+  const AIM_YAW_RIGHT = 0.55;   // max additional yaw when looking right
   const AIM_PITCH = 0.40;   // ~23° max pitch
-  const camAimX = -state.aim.x * AIM_YAW;     // mouse right → yaw < 0 → look right ✓
+  const camAimX = state.aim.x >= 0
+    ? -state.aim.x * AIM_YAW_RIGHT   // mouse right → yaw < 0 → look right ✓
+    : -state.aim.x * AIM_YAW_LEFT;   // mouse left  → yaw > 0 → look left, clamped
   const camAimY =  state.aim.y * AIM_PITCH;   // mouse up    → pitch > 0 → look up  ✓
 
   // Spring + damping into camera rotation. This produces the "lag" between the
