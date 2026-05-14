@@ -1215,6 +1215,8 @@ const state = {
   t: 0,
   lastInputTime: 0,   // seconds (state.t) of the last player input — used to
                       // trigger the idle camera drift after 5s of inactivity.
+  lastShotTime: 0,    // seconds (state.t) of the last shot — drives wave debuffs
+                      // (mousemove alone shouldn't make the player look "engaged").
   idleDrift: 0,       // accumulated pitch offset from the idle drift, applied
                       // directly to camera.rotation.x (no spring damping).
 };
@@ -2463,6 +2465,7 @@ function tryShoot() {
   if (se && se.classList.contains('on')) return;
   if (state.boltsLeft <= 0) { AudioFx.miss(); return; }
   state.boltsLeft--;
+  state.lastShotTime = state.t;
   updateAmmo();
   // Doppelschuss: while doppelSh > 0, skip the firing-rate gate.
   if (state.fx.doppelSh > 0) {
@@ -2542,6 +2545,7 @@ function tryShoot() {
   let convergeDist = 5.0;
   let bestErrSq = Infinity;
   for (const a of state.apples) {
+    if (a.isGhost) continue;          // phantom twins: bolts pass through
     const toApple = a.hitbox.center.clone().sub(camera.position);
     const along = toApple.dot(aimDir);
     if (along < 1.0) continue;
@@ -2557,6 +2561,7 @@ function tryShoot() {
   if (state.fx.magnetSh > 0) {
     let best = null, bestAng = 0.22;  // ~12° cone
     for (const a of state.apples) {
+      if (a.isGhost) continue;
       const toA = a.hitbox.center.clone().sub(startPos).normalize();
       const ang = Math.acos(Math.max(-1, Math.min(1, toA.dot(dir))));
       if (ang < bestAng) { bestAng = ang; best = toA; }
@@ -2589,6 +2594,7 @@ function tryShoot() {
   let hitPoints = 0;
   let bestT = Infinity;
   for (let i = 0; i < state.apples.length; i++) {
+    if (state.apples[i].isGhost) continue;   // phantom twins: bolt phases through
     const hb = state.apples[i].hitbox;
     const oc = startPos.clone().sub(hb.center);
     const b = oc.dot(dir);
@@ -2730,17 +2736,22 @@ function shatterApple(idx, impactPoint, impactDir) {
 // Each wave is BREATHER_SEC of intro banner, then ACTIVE_SEC of play with its
 // debuff stack. After wave 7 the session ends and the recap overlay opens.
 // ---------------------------------------------------------------------------
-const WAVE_ACTIVE_SEC = 45;
+const WAVE_DEFAULT_ACTIVE_SEC = 45;
 const WAVE_BREATHER_SEC = 3;
 const WAVE_CONFIG = [
-  { num: 1, title: 'ВОЛНА I',   sub: 'Разминка. Стреляй спокойно.',                          debuffs: [] },
-  { num: 2, title: 'ВОЛНА II',  sub: 'Икота и туннельное зрение при бездействии.',           debuffs: ['hiccup', 'tunnel'] },
+  // Wave 1 is intentionally short so the player meets wave-2 debuffs quickly.
+  { num: 1, title: 'ВОЛНА I',   sub: 'Разминка. Стреляй спокойно.',                          duration: 15, debuffs: [] },
+  { num: 2, title: 'ВОЛНА II',  sub: 'Икота и туннельное зрение, особенно при бездействии.', debuffs: ['hiccup', 'tunnel'] },
   { num: 3, title: 'ВОЛНА III', sub: 'Двойники яблок — выбери настоящее.',                   debuffs: ['double'] },
   { num: 4, title: 'ВОЛНА IV',  sub: 'Усыхание, маятник и щит-яблоки.',                      debuffs: ['shrink', 'pendulum', 'shield'] },
   { num: 5, title: 'ВОЛНА V',   sub: 'Икота + маятник + щиты.',                              debuffs: ['hiccup', 'tunnel', 'shrink', 'pendulum', 'shield'] },
   { num: 6, title: 'ВОЛНА VI',  sub: 'Полный мрак — всё сразу.',                             debuffs: ['hiccup', 'tunnel', 'double', 'shrink', 'pendulum', 'shield'] },
-  { num: 7, title: 'ФИНАЛ',     sub: 'Лёгкий бой. Добивай и закрывай сессию.',               debuffs: [] },
+  { num: 7, title: 'ФИНАЛ',     sub: 'Лёгкий бой. Добивай и закрывай сессию.',               duration: 25, debuffs: [] },
 ];
+function waveDuration(num) {
+  const cfg = WAVE_CONFIG[num - 1];
+  return (cfg && cfg.duration) || WAVE_DEFAULT_ACTIVE_SEC;
+}
 
 function currentWaveDebuffs() {
   const w = state.wave;
@@ -2762,7 +2773,7 @@ function startWaveBreather(num) {
 
 function startWaveActive() {
   state.wave.phase = 'active';
-  state.wave.timer = WAVE_ACTIVE_SEC;
+  state.wave.timer = waveDuration(state.wave.num);
   state.wave.waveT = 0;
   hideWaveBanner();
 }
@@ -2783,6 +2794,9 @@ function hideWaveBanner() {
 function tickWave(realDt) {
   const w = state.wave;
   if (!w || w.phase === 'ended') return;
+  // Don't advance waves while the start screen or session-end overlay is up.
+  const startEl = document.getElementById('start');
+  if (startEl && startEl.style.display !== 'none') return;
   w.timer -= realDt;
   if (w.phase === 'active') w.waveT += realDt;
   if (w.phase === 'breather' && w.timer <= 0) {
@@ -2797,15 +2811,17 @@ function tickWave(realDt) {
 
   // Apply currently-active debuffs.
   const debuffs = currentWaveDebuffs();
-  // Hiccup + tunnel both gated by idle time (10 s / 15 s).
-  const idleSec = state.t - state.lastInputTime;
+  // Idle metric is "time since last SHOT" — mouse twitches shouldn't reset it,
+  // otherwise the wave-2 debuffs basically never fire on an active aimer.
+  const idleSec = state.t - state.lastShotTime;
   if (debuffs.includes('hiccup')) tickHiccup(realDt, idleSec);
-  // Targeted tunnel intensity (0..1).
+  // Tunnel: baseline vignette as soon as wave 2 starts (so the player sees
+  // SOMETHING is wrong), ramps hard with idle.
   let targetTunnel = 0;
-  if (debuffs.includes('tunnel') && idleSec > 15) {
-    targetTunnel = Math.min(0.95, (idleSec - 15) / 20);
+  if (debuffs.includes('tunnel')) {
+    targetTunnel = 0.22 + Math.min(0.7, Math.max(0, (idleSec - 2) / 6) * 0.7);
   }
-  w.tunnel += (targetTunnel - w.tunnel) * Math.min(1, realDt * 1.2);
+  w.tunnel += (targetTunnel - w.tunnel) * Math.min(1, realDt * 1.6);
   document.getElementById('tunnel').style.opacity = w.tunnel.toFixed(3);
 
   // Wave 3 doubling: triggers 15 s into an active wave that lists 'double'.
@@ -2817,35 +2833,40 @@ function tickWave(realDt) {
   // Pendulum motion: update apple positions each frame.
   if (debuffs.includes('pendulum')) tickPendulum();
 
-  // Slow promille creep from time pressure.
-  state.promille = Math.min(100, state.promille + realDt * 0.4);
+  // Promille creep — base + per-wave bonus so each wave ratchets pressure.
+  const waveBonus = Math.max(0, state.wave.num - 1) * 0.35;
+  state.promille = Math.min(100, state.promille + realDt * (0.9 + waveBonus));
   applyPromilleUi();
 }
 
 function tickHiccup(realDt, idleSec) {
   const w = state.wave;
-  // Cooldown ticks down regardless; impulses only fire if idle > 10 s.
+  // Hiccups fire periodically even when the player is aiming — they only
+  // get FASTER and HARDER when the player has been idle for a while.
   w.hiccupCooldown -= realDt;
-  if (idleSec > 10 && w.hiccupCooldown <= 0) {
+  if (w.hiccupCooldown <= 0) {
     if (state.fx.schild) {
-      state.fx.schild = false;  // Schild eats one debuff tick
+      state.fx.schild = false;  // Schild eats one tick
     } else {
-      // Impulse — works like recoil but DOES NOT spring back to zero.
-      const sx = (Math.random() - 0.5) * 0.18;
-      const sy = (Math.random() - 0.5) * 0.14;
-      w.hiccupX = Math.max(-0.6, Math.min(0.6, w.hiccupX + sx));
-      w.hiccupY = Math.max(-0.45, Math.min(0.45, w.hiccupY + sy));
-      // Bump promille a touch every hiccup so idling has a real cost.
-      state.promille = Math.min(100, state.promille + 2.5);
-      state.cameraSwayVel.x += sx * 1.4;
-      state.cameraSwayVel.y += sy * 1.4;
+      const idleBoost = idleSec > 4 ? 1.8 : 1.0;
+      // Big enough to LOOK like a hiccup — visible camera lurch and a
+      // permanent offset that drifts back very slowly.
+      const sx = (Math.random() - 0.5) * 0.32 * idleBoost;
+      const sy = (Math.random() - 0.5) * 0.26 * idleBoost;
+      w.hiccupX = Math.max(-0.85, Math.min(0.85, w.hiccupX + sx));
+      w.hiccupY = Math.max(-0.65, Math.min(0.65, w.hiccupY + sy));
+      // Every hiccup also bumps promille — idling is genuinely punishing.
+      state.promille = Math.min(100, state.promille + (idleSec > 4 ? 4.5 : 2.0));
+      // And kick the spring so there's an immediate visible jolt.
+      state.cameraSwayVel.x += sx * 1.8;
+      state.cameraSwayVel.y += sy * 1.8;
     }
-    w.hiccupCooldown = 2.5 + Math.random() * 1.5;
+    // Cadence: ~4–5 s when engaged, ~1.8–2.8 s when idling.
+    w.hiccupCooldown = (idleSec > 4 ? 1.8 : 4.0) + Math.random() * 1.0;
   }
-  // Soft drift back toward zero — much slower than recoil, so the offset
-  // persists but doesn't lock the camera.
-  w.hiccupX *= Math.exp(-realDt * 0.05);
-  w.hiccupY *= Math.exp(-realDt * 0.05);
+  // Slow decay of the persistent offset (much slower than recoil).
+  w.hiccupX *= Math.exp(-realDt * 0.06);
+  w.hiccupY *= Math.exp(-realDt * 0.06);
 }
 
 function tickPendulum() {
@@ -2864,20 +2885,45 @@ function tickPendulum() {
 }
 
 function triggerDoubling() {
-  // For each live apple, spawn a ghost twin at the same anchor with a small
-  // sideways offset. Each pair gets one randomly-assigned "real" apple; the
-  // other is `isGhost=true` and registers a miss when struck.
+  // Wave-3 doubling: the original apple LEAVES its anchor and both copies
+  // settle at equal distance to either side of where the apple used to be.
+  // Spacing is perpendicular to the camera ray so the pair sits side-by-side
+  // from the player's perspective (not stacked in depth). One copy is the
+  // real apple; the other is a phantom — bolts pass straight through.
   const originals = state.apples.slice();
   let pairCounter = 0;
   for (const a of originals) {
     if (a.shieldHits > 0) continue;  // shielded apples don't double — too cruel
     const pairId = ++pairCounter;
     a.pairId = pairId;
-    // Spawn the twin.
     const size = a.size || 0.2;
+    const basePos = a.obj.position.clone();
+    // Pick a horizontal axis perpendicular to the camera→apple line so the
+    // twins are visually distinct (not occluding each other).
+    const camToApple = basePos.clone().sub(camera.position);
+    camToApple.y = 0;
+    if (camToApple.lengthSq() < 1e-4) camToApple.set(0, 0, -1);
+    camToApple.normalize();
+    const perp = new THREE.Vector3(-camToApple.z, 0, camToApple.x).normalize();
+    const half = 0.32 + size * 0.4;            // half-distance between the twins
+    const offA = perp.clone().multiplyScalar(-half);
+    const offB = perp.clone().multiplyScalar(+half);
+
+    // Move the ORIGINAL apple to one side of the spawn point.
+    a.obj.position.copy(basePos.clone().add(offA));
+    a.hitbox.center.copy(a.obj.position);
+    if (a.pendulum) a.pendulum.base.copy(basePos.clone().add(offA));
+    a.obj.traverse(o => {
+      if (o.isMesh && o.material) {
+        o.material.transparent = true;
+        o.material.opacity = 0.55;
+        o.material.depthWrite = false;
+      }
+    });
+
+    // Spawn the twin on the other side.
     const twinApple = makeAppleMesh(size, { translucent: true });
-    const off = new THREE.Vector3(0.45, 0.0, 0.45 * (Math.random() < 0.5 ? -1 : 1));
-    twinApple.position.copy(a.obj.position).add(off);
+    twinApple.position.copy(basePos.clone().add(offB));
     scene.add(twinApple);
     const twinEntry = {
       obj: twinApple,
@@ -2886,19 +2932,14 @@ function triggerDoubling() {
       isGhost: false,
       pairId,
       shieldHits: 0,
-      pendulum: a.pendulum ? { ...a.pendulum, base: twinApple.position.clone(), phase: a.pendulum.phase + Math.PI } : null,
+      pendulum: a.pendulum
+        ? { ...a.pendulum, base: basePos.clone().add(offB), phase: a.pendulum.phase + Math.PI }
+        : null,
       spec: a.spec,
     };
     state.apples.push(twinEntry);
-    // Also tint the original semi-transparent — both must look the same.
-    a.obj.traverse(o => {
-      if (o.isMesh && o.material) {
-        o.material.transparent = true;
-        o.material.opacity = 0.55;
-        o.material.depthWrite = false;
-      }
-    });
-    // Roll the dice — one of the pair is the ghost.
+
+    // Roll the dice — one is the real target, the other is the phantom.
     if (Math.random() < 0.5) a.isGhost = true; else twinEntry.isGhost = true;
   }
 }
@@ -2911,18 +2952,20 @@ function applyPromilleUi() {
   val.textContent = state.promille.toFixed(0);
 }
 function bumpPromilleHit(zone) {
-  // Center hits cool the head; mid trims a bit; outer = neutral.
-  if (zone === 'center')   state.promille = Math.max(0, state.promille - 6);
-  else if (zone === 'mid') state.promille = Math.max(0, state.promille - 2);
+  // Centre is a strong sobering hit; mid cools a bit; outer is neutral.
+  if (zone === 'center')   state.promille = Math.max(0, state.promille - 10);
+  else if (zone === 'mid') state.promille = Math.max(0, state.promille - 3);
   applyPromilleUi();
 }
 function bumpPromilleMiss() {
-  state.promille = Math.min(100, state.promille + 7);
+  state.promille = Math.min(100, state.promille + 12);
   applyPromilleUi();
 }
 function effectivePromilleMul() {
-  // 0 promille → ×1.0 ; 100 promille → ×2.2 drunkenness/drift baseline.
-  return 1.0 + (state.promille / 100) * 1.2;
+  // Quadratic curve — gentle for the first half of the bar, punishing past 60.
+  // 0 → ×1.0 ; 50 → ×1.9 ; 75 → ×3.0 ; 100 → ×4.6.
+  const p = state.promille / 100;
+  return 1.0 + p * p * 3.6;
 }
 
 function endSession() {
@@ -3120,22 +3163,7 @@ function tick() {
         // have been shattered by an earlier in-flight bolt.
         if (b.hitAppleIdx >= 0 && b.hitAppleIdx < state.apples.length) {
           const apple = state.apples[b.hitAppleIdx];
-          if (apple.isGhost) {
-            // Wave-3 ghost twin — counts as a miss. Vanish silently with no score,
-            // but DO bump promille and reset the streak.
-            AudioFx.miss();
-            state.streak = 0;
-            bumpPromilleMiss();
-            onBonusMiss();
-            scene.remove(apple.obj);
-            // Also remove its real twin so the pair doesn't linger half-resolved.
-            for (let pi = state.apples.length - 1; pi >= 0; pi--) {
-              if (state.apples[pi].pairId === apple.pairId) {
-                if (pi !== b.hitAppleIdx) scene.remove(state.apples[pi].obj);
-                state.apples.splice(pi, 1);
-              }
-            }
-          } else if (apple.shieldHits > 1) {
+          if (apple.shieldHits > 1) {
             // Shielded apple: first hit cracks the shield, doesn't shatter.
             apple.shieldHits--;
             apple.obj.traverse(o => {
