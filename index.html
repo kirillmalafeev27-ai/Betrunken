@@ -323,9 +323,28 @@
     cursor: pointer;
     transition: background 0.12s, border-color 0.12s;
   }
-  #sub-picker .opt:hover { background: #3a3733; border-color: var(--accent); }
+  #sub-picker .opt:hover:not(.disabled) { background: #3a3733; border-color: var(--accent); }
   #sub-picker .opt .name { font-weight: 600; color: var(--accent); }
   #sub-picker .opt .desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  #sub-picker .opt .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  #sub-picker .opt .price { color: #8fd99a; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #sub-picker .opt .tag {
+    font-size: 10px; letter-spacing: 0.5px; color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  #sub-picker .opt.expired { opacity: 0.55; }
+  #sub-picker .opt.disabled { opacity: 0.45; cursor: not-allowed; }
+  #sub-picker .opt.disabled .price { color: #c44a1a; }
+  #sub-picker .balance {
+    margin-top: 10px;
+    color: var(--text-dim);
+    font-size: 11px;
+    text-align: center;
+  }
+  #sub-picker .balance b { color: #8fd99a; font-weight: 700; }
+
+  /* Euro counter in the stats card pops a little — green money. */
+  #euros-line { color: #8fd99a; font-weight: 600; }
   #sub-picker .skip {
     margin-top: 10px;
     background: none;
@@ -747,7 +766,7 @@
       <div class="sub">арбалет · таверна · яблоко</div>
     </div>
     <div class="hud-card stats">
-      выстрелов: <b id="shots">0</b> &nbsp;·&nbsp; попаданий: <b id="hits">0</b> &nbsp;·&nbsp; <span id="acc">—</span> &nbsp;·&nbsp; очки: <b id="score">0</b>
+      выстрелов: <b id="shots">0</b> &nbsp;·&nbsp; попаданий: <b id="hits">0</b> &nbsp;·&nbsp; <span id="acc">—</span> &nbsp;·&nbsp; очки: <b id="score">0</b> &nbsp;·&nbsp; <span id="euros-line">€<b id="euros">0</b></span>
     </div>
   </div>
 
@@ -1112,6 +1131,7 @@ const state = {
   shots: 0,
   hits: 0,
   score: 0,
+  euros: 0,          // currency earned from hits; spent in the sub-picker
   streak: 0,         // consecutive hits — drives the streak popup
   bestStreak: 0,
   boltsLeft: 4,      // hard cap of 4 bolts per run; reload button refills
@@ -1218,6 +1238,8 @@ function updateStats() {
   $('hits').textContent = state.hits;
   $('acc').textContent = state.shots ? Math.round(state.hits / state.shots * 100) + '%' : '—';
   $('score').textContent = state.score;
+  const e = $('euros');
+  if (e) e.textContent = state.euros;
 }
 
 let _scorePopTimer = null;
@@ -1362,17 +1384,31 @@ function onBonusHit() {
 }
 
 // Sub-picker — opens after a hit if a tile is armed and has live subs.
+// Position 1 is the rightmost sub-quad (the strongest, drains first); it's
+// also the most expensive. Prices descend by position.
+const SUB_PRICE_BY_POS = { 1: 14, 2: 9, 3: 5, 4: 3 };
+// Euro reward per hit zone — same shape as scoring but a separate currency.
+const EUR_REWARD_BY_ZONE = { center: 10, mid: 5, outer: 2 };
+function priceForSub(sub) {
+  return SUB_PRICE_BY_POS[sub.pos] != null ? SUB_PRICE_BY_POS[sub.pos] : 5;
+}
+function subLiveOpacity(tile, idx) {
+  return Math.max(0, Math.min(1, tile.t - idx));
+}
+function isSubBuyable(tile, sub, idx) {
+  // Money is the universal gate; streak-requirement still blocks where set
+  // (Atem anhalten). Timer state is purely cosmetic now.
+  if (sub.requiresStreak && state.streak < sub.requiresStreak) return false;
+  if (state.euros < priceForSub(sub)) return false;
+  return true;
+}
 function availableSubs(tile) {
-  // A sub-quad at LEFT-index i is "live" if its opacity is >= 0.4 (the
-  // rightmost ones drain first, so this also enforces the hierarchy).
+  // Used by callers that want a "free" claim list (e.g., legacy code paths).
+  // With the economy, anything buyable counts.
   const live = [];
   for (let i = 0; i < tile.subs.length; i++) {
-    const op = Math.max(0, Math.min(1, tile.t - i));
-    if (op >= 0.4) {
-      const sub = tile.subs[i];
-      if (sub.requiresStreak && state.streak < sub.requiresStreak) continue;
-      live.push(sub);
-    }
+    const sub = tile.subs[i];
+    if (isSubBuyable(tile, sub, i)) live.push(sub);
   }
   return live;
 }
@@ -1382,8 +1418,6 @@ let _pickerRemaining = 0;
 function openSubPicker(tileId) {
   const tile = state.bonusTiles.find(t => t.id === tileId);
   if (!tile) return false;
-  const live = availableSubs(tile);
-  if (live.length === 0) return false;
   _pickerTile = tile;
   _pickerRemaining = state.fx.zinsen ? 2 : 1;
   renderSubPicker();
@@ -1393,34 +1427,63 @@ function openSubPicker(tileId) {
 function renderSubPicker() {
   const tile = _pickerTile;
   if (!tile) return;
-  const live = availableSubs(tile);
   const opts = document.getElementById('sp-options');
   const titleEl = document.getElementById('sp-title');
   const suffix = _pickerRemaining > 1 ? ' · ОСТАЛОСЬ ВЫБОРОВ: ' + _pickerRemaining : '';
   titleEl.textContent = 'БОНУС: ' + tile.title.toUpperCase() + suffix;
   opts.innerHTML = '';
-  if (live.length === 0) { closeSubPicker(); return; }
-  for (const sub of live) {
+  for (let i = 0; i < tile.subs.length; i++) {
+    const sub = tile.subs[i];
+    const price = priceForSub(sub);
+    const live = subLiveOpacity(tile, i) >= 0.4;
+    const streakOk = !sub.requiresStreak || state.streak >= sub.requiresStreak;
+    const canAfford = state.euros >= price;
+    const buyable = streakOk && canAfford;
     const b = document.createElement('button');
     b.className = 'opt';
+    if (!live) b.classList.add('expired');
+    if (!buyable) b.classList.add('disabled');
     b.type = 'button';
-    b.innerHTML = '<div class="name">' + sub.name + '</div><div class="desc">' + sub.desc + '</div>';
-    b.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t });
-      tile.t = Math.max(0, tile.t - 1);
-      applySubEffect(sub.id);
-      renderBonusBar();
-      _pickerRemaining--;
-      if (_pickerRemaining <= 0) {
-        if (state.fx.zinsen) state.fx.zinsen = false; // consumed
-        closeSubPicker();
-      } else {
-        renderSubPicker();
-      }
-    });
+    const tagBits = [];
+    tagBits.push(live ? 'В НАЛИЧИИ' : 'ИСТЁК');
+    if (sub.requiresStreak) tagBits.push('СЕРИЯ ≥ ' + sub.requiresStreak);
+    b.innerHTML =
+      '<div class="row">' +
+        '<div class="name">' + sub.name + '</div>' +
+        '<div class="price">€' + price + '</div>' +
+      '</div>' +
+      '<div class="desc">' + sub.desc + '</div>' +
+      '<div class="tag">' + tagBits.join(' · ') + '</div>';
+    if (buyable) {
+      b.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        // Re-validate at click time (state may have changed since render).
+        if (state.euros < price) return;
+        if (sub.requiresStreak && state.streak < sub.requiresStreak) return;
+        state.euros -= price;
+        updateStats();
+        state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t, paid: price });
+        // Consume one sub-quad from the tile if there's stock to consume.
+        if (tile.t > 0) tile.t = Math.max(0, tile.t - 1);
+        applySubEffect(sub.id);
+        renderBonusBar();
+        _pickerRemaining--;
+        if (_pickerRemaining <= 0) {
+          if (state.fx.zinsen) state.fx.zinsen = false;
+          closeSubPicker();
+        } else {
+          renderSubPicker();
+        }
+      });
+    }
     opts.appendChild(b);
   }
+  // Show running balance and current selected tile's prices so the player can
+  // tell at a glance how much they have left.
+  const bal = document.createElement('div');
+  bal.className = 'balance';
+  bal.innerHTML = 'На счету: <b>€' + state.euros + '</b>';
+  opts.appendChild(bal);
 }
 function applySubEffect(subId) {
   const fx = state.fx;
@@ -1763,7 +1826,7 @@ window.addEventListener('contextmenu', (e) => {
 // shot-fire hook patched there. Here is the centralised consumption fallback.
 
 $('reset').addEventListener('click', () => {
-  state.shots = 0; state.hits = 0; state.score = 0;
+  state.shots = 0; state.hits = 0; state.score = 0; state.euros = 0;
   state.streak = 0; state.bestStreak = 0;
   state.claimedSubs.length = 0;
   // Clear all fx
@@ -2873,13 +2936,14 @@ function endSession() {
     '<div class="row"><span>Точность</span><b>' + acc + '%</b></div>' +
     '<div class="row"><span>Очки</span><b>' + state.score + '</b></div>' +
     '<div class="row"><span>Лучший стрик</span><b>×' + state.bestStreak + '</b></div>' +
+    '<div class="row"><span>На счету</span><b>€' + state.euros + '</b></div>' +
     '<div class="row"><span>Финальный Promille</span><b>' + state.promille.toFixed(0) + '</b></div>';
   document.getElementById('se-stats').innerHTML = html;
   document.getElementById('session-end').classList.add('on');
 }
 function restartSession() {
   document.getElementById('session-end').classList.remove('on');
-  state.shots = 0; state.hits = 0; state.score = 0;
+  state.shots = 0; state.hits = 0; state.score = 0; state.euros = 0;
   state.streak = 0; state.bestStreak = 0;
   state.claimedSubs.length = 0;
   state.promille = 0;
@@ -3085,6 +3149,9 @@ function tick() {
           } else {
             state.hits++;
             state.score += b.hitPoints || 0;
+            // Economy reward: zone-based euros credited to the player's balance.
+            const eur = EUR_REWARD_BY_ZONE[b.hitZone] || 0;
+            state.euros += eur;
             state.streak++;
             if (state.streak > state.bestStreak) state.bestStreak = state.streak;
             state.lastZone = b.hitZone;
