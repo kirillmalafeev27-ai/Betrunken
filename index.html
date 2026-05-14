@@ -154,6 +154,12 @@
     .bonus-tile .sub { width: 9px; height: 9px; }
     #ammo { top: 8px; padding: 4px 8px; font-size: 11px; gap: 5px; }
     #ammo .dot { width: 5px; height: 14px; }
+    #promille-meter { top: 38px; padding: 3px 8px; font-size: 10px; gap: 5px; }
+    #promille-meter .bar { width: 90px; height: 6px; }
+    #promille-meter .val { min-width: 18px; }
+    #wave-banner .wb-title { font-size: 22px; letter-spacing: 3px; }
+    #wave-banner .wb-sub { font-size: 11px; max-width: 84vw; }
+    #wave-banner .wb-count { font-size: 36px; margin-top: 8px; }
     #streak-pop .burst { font-size: 26px; padding: 10px 18px; }
     #spawn-editor .panel { width: 94vw; padding: 14px 16px; }
     #spawn-editor h2 { font-size: 15px; }
@@ -369,6 +375,124 @@
   #ammo #reload-btn.on { display: inline-block; }
   #ammo #reload-btn:hover { background: rgba(230,110,80,0.95); }
 
+  /* Wave 3 — debuff overlays: tunnel vision vignette. Opacity is driven from JS. */
+  #tunnel {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 3;
+    background: radial-gradient(circle at center,
+      rgba(0,0,0,0) 30%,
+      rgba(0,0,0,0.45) 55%,
+      rgba(0,0,0,0.92) 85%);
+    opacity: 0;
+    transition: opacity 0.45s;
+  }
+
+  /* Wave announcement banner */
+  #wave-banner {
+    position: absolute;
+    top: 22%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    z-index: 6;
+    opacity: 0;
+    transition: opacity 0.35s;
+  }
+  #wave-banner.on { opacity: 1; }
+  #wave-banner .wb-title {
+    font-size: 36px; font-weight: 900;
+    letter-spacing: 5px;
+    color: var(--accent);
+    text-shadow: 0 2px 0 #1a0e04, 0 6px 18px rgba(0,0,0,0.7);
+  }
+  #wave-banner .wb-sub {
+    margin-top: 8px;
+    font-size: 14px;
+    color: var(--text);
+    text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+    max-width: 60vw;
+    margin-left: auto; margin-right: auto;
+  }
+  #wave-banner .wb-count {
+    margin-top: 14px;
+    font-size: 56px; font-weight: 900;
+    color: #ffd45a;
+    text-shadow: 0 2px 0 #1a0e04, 0 0 24px rgba(255,200,80,0.55);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Promille meter — top-center under #ammo */
+  #promille-meter {
+    position: absolute;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(20,18,16,0.72);
+    border: 1px solid rgba(200,144,96,0.15);
+    border-radius: 10px;
+    padding: 4px 10px;
+    color: var(--text);
+    font-size: 11px;
+    z-index: 5;
+    backdrop-filter: blur(6px);
+  }
+  #promille-meter .lbl { color: var(--text-dim); letter-spacing: 1px; }
+  #promille-meter .bar {
+    width: 140px; height: 8px;
+    background: rgba(60,56,48,0.6);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  #promille-meter .fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #d9a073 0%, #ff8a3c 60%, #c44a1a 100%);
+    transition: width 0.25s;
+  }
+  #promille-meter .val { font-variant-numeric: tabular-nums; min-width: 26px; text-align: right; }
+
+  /* Session end overlay */
+  #session-end {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    background: rgba(10,9,8,0.75);
+    backdrop-filter: blur(4px);
+    z-index: 70;
+  }
+  #session-end.on { display: flex; }
+  #session-end .panel {
+    background: var(--panel);
+    border: 1px solid rgba(200,144,96,0.28);
+    border-radius: 14px;
+    padding: 26px 30px;
+    text-align: center;
+    max-width: 92vw;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.55);
+  }
+  #session-end h2 { margin: 0 0 14px; color: var(--accent); font-size: 22px; letter-spacing: 1px; }
+  #session-end .stats {
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.7;
+    margin-bottom: 18px;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+  }
+  #session-end .stats .row { display: flex; justify-content: space-between; gap: 18px; }
+  #session-end .stats .row b { color: var(--accent); }
+  #session-end button {
+    font-size: 14px; padding: 10px 24px;
+    background: var(--accent); color: #1a1916; border: none; font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer; letter-spacing: 0.5px;
+  }
+  #session-end button:hover { background: #d9a073; }
+
   /* Active sub-bonus effects strip (top-left, below the title) */
   #active-fx {
     position: absolute;
@@ -576,6 +700,28 @@
     <div class="dot" data-i="2"></div>
     <div class="dot" data-i="3"></div>
     <button id="reload-btn" type="button">ПЕРЕЗАРЯД</button>
+  </div>
+
+  <div id="tunnel"></div>
+
+  <div id="wave-banner">
+    <div class="wb-title"></div>
+    <div class="wb-sub"></div>
+    <div class="wb-count"></div>
+  </div>
+
+  <div id="promille-meter">
+    <span class="lbl">PROMILLE</span>
+    <div class="bar"><div class="fill" id="promille-fill"></div></div>
+    <span class="val" id="promille-val">0.0</span>
+  </div>
+
+  <div id="session-end">
+    <div class="panel">
+      <h2>СЕССИЯ ОКОНЧЕНА</h2>
+      <div class="stats" id="se-stats"></div>
+      <button id="se-restart" type="button">Повторить успех</button>
+    </div>
   </div>
 
   <div id="bonus-bar"></div>
@@ -999,6 +1145,22 @@ const state = {
   },
   trails: [],        // leuchtspur dotted trails (auto-fading)
   ghostBolt: null,   // geist-pfeil ghost arrow object
+  // Promille — hidden drunkenness pressure gauge that scales drunk + drift.
+  // Range 0..100. Grows from time / misses / Schnaps; falls from good hits / Kaffee.
+  promille: 0,
+  // Wave system — 1..7, with breather between active windows. Wave debuffs are
+  // applied based on the current waves's debuff list (which may inherit
+  // previous waves on 5 / 6).
+  wave: {
+    num: 1,
+    phase: 'breather',   // 'breather' (3s intro) | 'active' (45s) | 'ended'
+    timer: 3.0,          // seconds left in current phase
+    waveT: 0,            // seconds elapsed inside the active wave
+    hiccupX: 0, hiccupY: 0,   // accumulated hiccup offset on camera (rad)
+    hiccupCooldown: 2.5,      // s until next hiccup chance
+    tunnel: 0,                // current tunnel-vision intensity 0..1
+    doublesActive: false,     // wave-3 doubling has triggered (after 15 s)
+  },
   lastZone: null,    // 'center' | 'mid' | 'outer' — set briefly after a hit
   lastZoneAt: -10,   // state.t when lastZone was set (for HUD flash fade)
   bolts: [],         // active flying bolts
@@ -1293,8 +1455,16 @@ function applySubEffect(subId) {
       fx.schnaps = 5.0;
       break;
     case 'kaffee':
-      // Clear any "negative" timed fx (no real debuffs yet — reserved).
+      // Wipe accumulated wave debuffs in one go: hiccup offset, tunnel
+      // vignette, and the Schnaps drunkness boost. Also cool the promille
+      // gauge as a "sobering" effect.
       fx.schnaps = 0;
+      state.wave.hiccupX = 0;
+      state.wave.hiccupY = 0;
+      state.wave.tunnel = 0;
+      state.wave.hiccupCooldown = 6.0;
+      state.promille = Math.max(0, state.promille - 25);
+      applyPromilleUi();
       break;
     case 'schild': fx.schild = true; break;
     case 'geduld': fx.geduld = 30.0; break;
@@ -1624,6 +1794,7 @@ function isHudTarget(t) {
                t.closest('#touch-controls') || t.closest('#spawn-editor') ||
                t.closest('#start') || t.closest('#bonus-bar') ||
                t.closest('#sub-picker') || t.closest('#ammo') ||
+               t.closest('#session-end') || t.closest('#promille-meter') ||
                t.tagName === 'BUTTON');
 }
 window.addEventListener('mousedown', e => {
@@ -2007,6 +2178,14 @@ function makeAppleMesh(size, opts = {}) {
         o.material.transparent = true;
         o.material.opacity = 0.35;
         o.material.depthWrite = false;
+      } else if (opts.translucent) {
+        // wave-3 doubling: both copies are semi-transparent.
+        o.material.transparent = true;
+        o.material.opacity = 0.55;
+        o.material.depthWrite = false;
+      } else if (opts.shield) {
+        // shield apples are tinted slightly darker so they read as armoured.
+        if (o.material.color) o.material.color.multiplyScalar(0.6);
       }
     }
   });
@@ -2015,19 +2194,55 @@ function makeAppleMesh(size, opts = {}) {
   return apple;
 }
 
+function appleVariantForWave() {
+  // Wave-4 introduces variant apples (shrunken / pendulum / shield).
+  // Returns a small descriptor consumed by spawnApple.
+  const w = state.wave.num;
+  const debuffs = currentWaveDebuffs();
+  const wave4Active = debuffs.includes('shrink') || debuffs.includes('pendulum') || debuffs.includes('shield');
+  if (!wave4Active) return { kind: 'normal' };
+  const r = Math.random();
+  if (debuffs.includes('shield') && r < 0.25) return { kind: 'shield' };
+  if (debuffs.includes('pendulum') && r < 0.55) return { kind: 'pendulum' };
+  if (debuffs.includes('shrink') && r < 0.80) return { kind: 'shrink' };
+  return { kind: 'normal' };
+}
+
 function spawnApple() {
-  // Spawn ALL configured points at once so multiple apples can be airborne
-  // simultaneously. Each entry of `state.apples` keeps the mesh and the
-  // collision sphere it was constructed from.
+  // Spawn ALL configured points at once. Each entry tracks its hitbox plus
+  // any wave-4 metadata (shield hits, pendulum motion, shrink flag).
   for (const spec of activeSpawns()) {
-    const apple = makeAppleMesh(spec.size);
+    const variant = appleVariantForWave();
+    let size = spec.size;
+    let opts = {};
+    let shieldHits = 0;
+    let pendulum = null;
+    if (variant.kind === 'shrink')   size = spec.size * 0.7;
+    if (variant.kind === 'shield')   { opts.shield = true; shieldHits = 2; }
+    if (variant.kind === 'pendulum') {
+      pendulum = {
+        base: new THREE.Vector3(spec.x, spec.y, spec.z),
+        R: 0.45,
+        phase: Math.random() * Math.PI * 2,
+        freq: 0.55 + Math.random() * 0.25,
+      };
+    }
+    const apple = makeAppleMesh(size, opts);
     apple.position.set(spec.x, spec.y, spec.z);
     scene.add(apple);
     state.apples.push({
       obj: apple,
-      hitbox: { center: apple.position.clone(), radius: spec.size * 0.55 },
+      hitbox: { center: apple.position.clone(), radius: size * 0.55 },
+      size,
+      isGhost: false,
+      pairId: null,
+      shieldHits,
+      pendulum,
+      spec,
     });
   }
+  // Reset wave-3 doubling so it can re-trigger this wave.
+  state.wave.doublesActive = false;
 }
 
 function respawnApple() {
@@ -2181,6 +2396,8 @@ function tryShoot() {
   if (!state.canShoot) return;
   const picker = document.getElementById('sub-picker');
   if (picker && picker.classList.contains('on')) return;
+  const se = document.getElementById('session-end');
+  if (se && se.classList.contains('on')) return;
   if (state.boltsLeft <= 0) { AudioFx.miss(); return; }
   state.boltsLeft--;
   updateAmmo();
@@ -2446,6 +2663,254 @@ function shatterApple(idx, impactPoint, impactDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Waves & Promille (Phase 3) — global pressure curve.
+// Each wave is BREATHER_SEC of intro banner, then ACTIVE_SEC of play with its
+// debuff stack. After wave 7 the session ends and the recap overlay opens.
+// ---------------------------------------------------------------------------
+const WAVE_ACTIVE_SEC = 45;
+const WAVE_BREATHER_SEC = 3;
+const WAVE_CONFIG = [
+  { num: 1, title: 'ВОЛНА I',   sub: 'Разминка. Стреляй спокойно.',                          debuffs: [] },
+  { num: 2, title: 'ВОЛНА II',  sub: 'Икота и туннельное зрение при бездействии.',           debuffs: ['hiccup', 'tunnel'] },
+  { num: 3, title: 'ВОЛНА III', sub: 'Двойники яблок — выбери настоящее.',                   debuffs: ['double'] },
+  { num: 4, title: 'ВОЛНА IV',  sub: 'Усыхание, маятник и щит-яблоки.',                      debuffs: ['shrink', 'pendulum', 'shield'] },
+  { num: 5, title: 'ВОЛНА V',   sub: 'Икота + маятник + щиты.',                              debuffs: ['hiccup', 'tunnel', 'shrink', 'pendulum', 'shield'] },
+  { num: 6, title: 'ВОЛНА VI',  sub: 'Полный мрак — всё сразу.',                             debuffs: ['hiccup', 'tunnel', 'double', 'shrink', 'pendulum', 'shield'] },
+  { num: 7, title: 'ФИНАЛ',     sub: 'Лёгкий бой. Добивай и закрывай сессию.',               debuffs: [] },
+];
+
+function currentWaveDebuffs() {
+  const w = state.wave;
+  if (!w || w.phase !== 'active') return [];
+  const cfg = WAVE_CONFIG[w.num - 1];
+  return cfg ? cfg.debuffs : [];
+}
+
+function startWaveBreather(num) {
+  const cfg = WAVE_CONFIG[num - 1];
+  if (!cfg) return endSession();
+  state.wave.num = num;
+  state.wave.phase = 'breather';
+  state.wave.timer = WAVE_BREATHER_SEC;
+  state.wave.waveT = 0;
+  state.wave.doublesActive = false;
+  showWaveBanner(cfg.title, cfg.sub, num);
+}
+
+function startWaveActive() {
+  state.wave.phase = 'active';
+  state.wave.timer = WAVE_ACTIVE_SEC;
+  state.wave.waveT = 0;
+  hideWaveBanner();
+}
+
+function showWaveBanner(title, sub, num) {
+  const el = document.getElementById('wave-banner');
+  if (!el) return;
+  el.querySelector('.wb-title').textContent = title;
+  el.querySelector('.wb-sub').textContent = sub;
+  el.querySelector('.wb-count').textContent = num + ' / 7';
+  el.classList.add('on');
+}
+function hideWaveBanner() {
+  const el = document.getElementById('wave-banner');
+  if (el) el.classList.remove('on');
+}
+
+function tickWave(realDt) {
+  const w = state.wave;
+  if (!w || w.phase === 'ended') return;
+  w.timer -= realDt;
+  if (w.phase === 'active') w.waveT += realDt;
+  if (w.phase === 'breather' && w.timer <= 0) {
+    startWaveActive();
+  } else if (w.phase === 'active' && w.timer <= 0) {
+    if (w.num >= WAVE_CONFIG.length) {
+      endSession();
+    } else {
+      startWaveBreather(w.num + 1);
+    }
+  }
+
+  // Apply currently-active debuffs.
+  const debuffs = currentWaveDebuffs();
+  // Hiccup + tunnel both gated by idle time (10 s / 15 s).
+  const idleSec = state.t - state.lastInputTime;
+  if (debuffs.includes('hiccup')) tickHiccup(realDt, idleSec);
+  // Targeted tunnel intensity (0..1).
+  let targetTunnel = 0;
+  if (debuffs.includes('tunnel') && idleSec > 15) {
+    targetTunnel = Math.min(0.95, (idleSec - 15) / 20);
+  }
+  w.tunnel += (targetTunnel - w.tunnel) * Math.min(1, realDt * 1.2);
+  document.getElementById('tunnel').style.opacity = w.tunnel.toFixed(3);
+
+  // Wave 3 doubling: triggers 15 s into an active wave that lists 'double'.
+  if (debuffs.includes('double') && !w.doublesActive && w.phase === 'active' && w.waveT > 15) {
+    triggerDoubling();
+    w.doublesActive = true;
+  }
+
+  // Pendulum motion: update apple positions each frame.
+  if (debuffs.includes('pendulum')) tickPendulum();
+
+  // Slow promille creep from time pressure.
+  state.promille = Math.min(100, state.promille + realDt * 0.4);
+  applyPromilleUi();
+}
+
+function tickHiccup(realDt, idleSec) {
+  const w = state.wave;
+  // Cooldown ticks down regardless; impulses only fire if idle > 10 s.
+  w.hiccupCooldown -= realDt;
+  if (idleSec > 10 && w.hiccupCooldown <= 0) {
+    if (state.fx.schild) {
+      state.fx.schild = false;  // Schild eats one debuff tick
+    } else {
+      // Impulse — works like recoil but DOES NOT spring back to zero.
+      const sx = (Math.random() - 0.5) * 0.18;
+      const sy = (Math.random() - 0.5) * 0.14;
+      w.hiccupX = Math.max(-0.6, Math.min(0.6, w.hiccupX + sx));
+      w.hiccupY = Math.max(-0.45, Math.min(0.45, w.hiccupY + sy));
+      // Bump promille a touch every hiccup so idling has a real cost.
+      state.promille = Math.min(100, state.promille + 2.5);
+      state.cameraSwayVel.x += sx * 1.4;
+      state.cameraSwayVel.y += sy * 1.4;
+    }
+    w.hiccupCooldown = 2.5 + Math.random() * 1.5;
+  }
+  // Soft drift back toward zero — much slower than recoil, so the offset
+  // persists but doesn't lock the camera.
+  w.hiccupX *= Math.exp(-realDt * 0.05);
+  w.hiccupY *= Math.exp(-realDt * 0.05);
+}
+
+function tickPendulum() {
+  const t = state.t;
+  for (const a of state.apples) {
+    if (!a.pendulum) continue;
+    const p = a.pendulum;
+    // Swing along upper semicircle: angle from horizontal, clamped 0..π.
+    const sw = Math.sin((t + p.phase) * p.freq);
+    const ang = (sw * 0.5 + 0.5) * Math.PI;        // 0..π
+    const dx = p.R * Math.cos(ang);
+    const dy = p.R * Math.sin(ang);                 // always >= 0 (upper half)
+    a.obj.position.set(p.base.x + dx, p.base.y + dy, p.base.z);
+    a.hitbox.center.copy(a.obj.position);
+  }
+}
+
+function triggerDoubling() {
+  // For each live apple, spawn a ghost twin at the same anchor with a small
+  // sideways offset. Each pair gets one randomly-assigned "real" apple; the
+  // other is `isGhost=true` and registers a miss when struck.
+  const originals = state.apples.slice();
+  let pairCounter = 0;
+  for (const a of originals) {
+    if (a.shieldHits > 0) continue;  // shielded apples don't double — too cruel
+    const pairId = ++pairCounter;
+    a.pairId = pairId;
+    // Spawn the twin.
+    const size = a.size || 0.2;
+    const twinApple = makeAppleMesh(size, { translucent: true });
+    const off = new THREE.Vector3(0.45, 0.0, 0.45 * (Math.random() < 0.5 ? -1 : 1));
+    twinApple.position.copy(a.obj.position).add(off);
+    scene.add(twinApple);
+    const twinEntry = {
+      obj: twinApple,
+      hitbox: { center: twinApple.position.clone(), radius: size * 0.55 },
+      size,
+      isGhost: false,
+      pairId,
+      shieldHits: 0,
+      pendulum: a.pendulum ? { ...a.pendulum, base: twinApple.position.clone(), phase: a.pendulum.phase + Math.PI } : null,
+      spec: a.spec,
+    };
+    state.apples.push(twinEntry);
+    // Also tint the original semi-transparent — both must look the same.
+    a.obj.traverse(o => {
+      if (o.isMesh && o.material) {
+        o.material.transparent = true;
+        o.material.opacity = 0.55;
+        o.material.depthWrite = false;
+      }
+    });
+    // Roll the dice — one of the pair is the ghost.
+    if (Math.random() < 0.5) a.isGhost = true; else twinEntry.isGhost = true;
+  }
+}
+
+function applyPromilleUi() {
+  const fill = document.getElementById('promille-fill');
+  const val  = document.getElementById('promille-val');
+  if (!fill || !val) return;
+  fill.style.width = state.promille.toFixed(1) + '%';
+  val.textContent = state.promille.toFixed(0);
+}
+function bumpPromilleHit(zone) {
+  // Center hits cool the head; mid trims a bit; outer = neutral.
+  if (zone === 'center')   state.promille = Math.max(0, state.promille - 6);
+  else if (zone === 'mid') state.promille = Math.max(0, state.promille - 2);
+  applyPromilleUi();
+}
+function bumpPromilleMiss() {
+  state.promille = Math.min(100, state.promille + 7);
+  applyPromilleUi();
+}
+function effectivePromilleMul() {
+  // 0 promille → ×1.0 ; 100 promille → ×2.2 drunkenness/drift baseline.
+  return 1.0 + (state.promille / 100) * 1.2;
+}
+
+function endSession() {
+  state.wave.phase = 'ended';
+  hideWaveBanner();
+  // Build stats block.
+  const acc = state.shots ? Math.round(state.hits / state.shots * 100) : 0;
+  const html =
+    '<div class="row"><span>Выстрелов</span><b>' + state.shots + '</b></div>' +
+    '<div class="row"><span>Попаданий</span><b>' + state.hits + '</b></div>' +
+    '<div class="row"><span>Точность</span><b>' + acc + '%</b></div>' +
+    '<div class="row"><span>Очки</span><b>' + state.score + '</b></div>' +
+    '<div class="row"><span>Лучший стрик</span><b>×' + state.bestStreak + '</b></div>' +
+    '<div class="row"><span>Финальный Promille</span><b>' + state.promille.toFixed(0) + '</b></div>';
+  document.getElementById('se-stats').innerHTML = html;
+  document.getElementById('session-end').classList.add('on');
+}
+function restartSession() {
+  document.getElementById('session-end').classList.remove('on');
+  state.shots = 0; state.hits = 0; state.score = 0;
+  state.streak = 0; state.bestStreak = 0;
+  state.claimedSubs.length = 0;
+  state.promille = 0;
+  state.wave.hiccupX = 0; state.wave.hiccupY = 0;
+  state.wave.tunnel = 0;
+  document.getElementById('tunnel').style.opacity = '0';
+  for (const k of Object.keys(state.fx)) {
+    if (typeof state.fx[k] === 'number') state.fx[k] = 0;
+    if (typeof state.fx[k] === 'boolean') state.fx[k] = false;
+    if (state.fx[k] === null || typeof state.fx[k] === 'object') state.fx[k] = null;
+  }
+  state.fx.nextKickX = null; state.fx.nextKickY = null;
+  setAdlerVisual(false);
+  reloadBolts();
+  respawnApple();
+  startWaveBreather(1);
+  updateStats();
+  applyPromilleUi();
+  updateActiveFx();
+}
+document.getElementById('se-restart').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  restartSession();
+});
+
+// Kick off the wave system at boot — start with the wave-1 breather so the
+// banner shows for 3 s before play begins.
+startWaveBreather(1);
+applyPromilleUi();
+
+// ---------------------------------------------------------------------------
 // Loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -2456,6 +2921,7 @@ function tick() {
   const slow = state.fx.zeitlupe > 0 ? 0.3 : 1.0;
   const dt = realDt * slow;
   tickFxTimers(realDt);
+  tickWave(realDt);
   state.t += dt;
 
   // FPS-style camera aim, with the SIGN CORRECTED so mouse-right = look-right.
@@ -2473,8 +2939,9 @@ function tick() {
   // Schnaps doubles drunkenness for 5 s (risky trade — only affects jitter).
   const atemMul = state.fx.atem > 0 ? 0.5 : 1.0;
   const schnapsMul = state.fx.schnaps > 0 ? 2.0 : 1.0;
-  const drift = state.drunk * atemMul * schnapsMul;
-  const posDriftMul = atemMul;
+  const promMul = effectivePromilleMul();
+  const drift = state.drunk * atemMul * schnapsMul * promMul;
+  const posDriftMul = atemMul * promMul;
   // Asymmetric yaw: leftward pan is clamped near the right edge of the
   // fireplace (which sits around world x≈-2 from the camera), so the view
   // can't drift off the scene on that side.
@@ -2554,8 +3021,11 @@ function tick() {
   }
 
   // Compose final camera orientation.
-  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x;
-  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift;
+  // Hiccup (wave 2+): persistent offset that doesn't decay through the aim
+  // spring — adds directly to the final rotation. Hides behind the spring's
+  // own noise, but accumulates if the player idles.
+  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY;
 
   // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
   if (state.crossbowKick > 0) {
@@ -2585,22 +3055,59 @@ function tick() {
         // Only fire the hit if the targeted apple is still alive — it may
         // have been shattered by an earlier in-flight bolt.
         if (b.hitAppleIdx >= 0 && b.hitAppleIdx < state.apples.length) {
-          state.hits++;
-          state.score += b.hitPoints || 0;
-          state.streak++;
-          if (state.streak > state.bestStreak) state.bestStreak = state.streak;
-          state.lastZone = b.hitZone;
-          state.lastZoneAt = state.t;
-          updateStats();
-          showScorePop(b.hitPoints, b.hitZone);
-          AudioFx.hit();
-          shatterApple(b.hitAppleIdx, b.hitPoint, b.dir);
-          onBonusHit();
-          if (state.streak >= 2) showStreakPop(state.streak);
-          if (state.selectedTileId) {
-            // Try to open the sub-picker for the armed tile. If the tile has
-            // no live subs (timer drained / streak-locked sub), silently skip.
-            openSubPicker(state.selectedTileId);
+          const apple = state.apples[b.hitAppleIdx];
+          if (apple.isGhost) {
+            // Wave-3 ghost twin — counts as a miss. Vanish silently with no score,
+            // but DO bump promille and reset the streak.
+            AudioFx.miss();
+            state.streak = 0;
+            bumpPromilleMiss();
+            onBonusMiss();
+            scene.remove(apple.obj);
+            // Also remove its real twin so the pair doesn't linger half-resolved.
+            for (let pi = state.apples.length - 1; pi >= 0; pi--) {
+              if (state.apples[pi].pairId === apple.pairId) {
+                if (pi !== b.hitAppleIdx) scene.remove(state.apples[pi].obj);
+                state.apples.splice(pi, 1);
+              }
+            }
+          } else if (apple.shieldHits > 1) {
+            // Shielded apple: first hit cracks the shield, doesn't shatter.
+            apple.shieldHits--;
+            apple.obj.traverse(o => {
+              if (o.isMesh && o.material && o.material.color) {
+                o.material.color.multiplyScalar(1.4);
+              }
+            });
+            AudioFx.hit();
+            // Brief score-pop hint and no streak bonus on the first hit.
+            showScorePop(b.hitPoints, b.hitZone);
+          } else {
+            state.hits++;
+            state.score += b.hitPoints || 0;
+            state.streak++;
+            if (state.streak > state.bestStreak) state.bestStreak = state.streak;
+            state.lastZone = b.hitZone;
+            state.lastZoneAt = state.t;
+            updateStats();
+            showScorePop(b.hitPoints, b.hitZone);
+            AudioFx.hit();
+            shatterApple(b.hitAppleIdx, b.hitPoint, b.dir);
+            onBonusHit();
+            bumpPromilleHit(b.hitZone);
+            if (state.streak >= 2) showStreakPop(state.streak);
+            if (state.selectedTileId) {
+              openSubPicker(state.selectedTileId);
+            }
+            // If this apple was part of a wave-3 pair, also remove its twin.
+            if (apple.pairId) {
+              for (let pi = state.apples.length - 1; pi >= 0; pi--) {
+                if (state.apples[pi].pairId === apple.pairId && pi !== b.hitAppleIdx) {
+                  scene.remove(state.apples[pi].obj);
+                  state.apples.splice(pi, 1);
+                }
+              }
+            }
           }
         }
         // Remove bolt shortly after impact.
@@ -2621,6 +3128,7 @@ function tick() {
         b.missPlayed = true;
         state.streak = 0;
         onBonusMiss();
+        bumpPromilleMiss();
       }
     }
   }
