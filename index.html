@@ -2,7 +2,9 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Betrunken — Crossbow Tavern</title>
 <style>
   :root {
@@ -14,9 +16,9 @@
     --accent: #c89060;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; cursor: none; }
-  #app { position: fixed; inset: 0; cursor: none; }
-  canvas { display: block; width: 100%; height: 100%; cursor: none; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; cursor: none; touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+  #app { position: fixed; inset: 0; cursor: none; touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; cursor: none; touch-action: none; }
 
   #hud {
     position: absolute; top: 0; left: 0; right: 0;
@@ -73,6 +75,83 @@
     font-size: 12px;
   }
   button:hover { background: #3a3733; }
+
+  /* Touch-only controls — hidden by default, body.touch enables them. */
+  #touch-controls { display: none; }
+  body.touch #touch-controls {
+    display: block;
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 6;
+  }
+  body.touch #fire-btn {
+    position: absolute;
+    right: calc(env(safe-area-inset-right, 0px) + 18px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 90px);
+    width: 92px; height: 92px;
+    border-radius: 50%;
+    background: rgba(200,80,60,0.78);
+    border: 2px solid rgba(255,220,180,0.6);
+    color: #fff8ec;
+    font-size: 15px; font-weight: 700;
+    letter-spacing: 1px;
+    pointer-events: auto;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  body.touch #fire-btn:active { background: rgba(230,110,80,0.9); transform: scale(0.96); }
+  body.touch #respawn-btn {
+    position: absolute;
+    left: calc(env(safe-area-inset-left, 0px) + 18px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 90px);
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: rgba(40,38,34,0.72);
+    border: 1px solid rgba(200,144,96,0.35);
+    color: var(--text);
+    font-size: 11px; font-weight: 600;
+    pointer-events: auto;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  body.touch #respawn-btn:active { background: rgba(80,74,66,0.85); }
+
+  /* On touch devices, the system cursor is irrelevant — but we still hide it
+     just in case (some browsers show a synthesized cursor). */
+  body.touch, body.touch #app, body.touch canvas { cursor: none; }
+
+  /* Compact HUD for small screens */
+  @media (max-width: 760px), (max-height: 520px) {
+    #hud { padding: 8px 10px; }
+    .hud-card { padding: 6px 9px; font-size: 11px; border-radius: 8px; }
+    .hud-card h1 { font-size: 12px; margin: 0; }
+    .hud-card .sub { display: none; }
+
+    #controls {
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      left: 8px; right: 8px;
+      gap: 6px;
+    }
+    .ctl { padding: 5px 8px; gap: 6px; font-size: 11px; border-radius: 8px; }
+    .ctl label { display: none; }
+    .ctl input[type=range] { width: 72px; }
+    .ctl .val { min-width: 24px; font-size: 10px; }
+    .ctl button { padding: 5px 8px; font-size: 11px; }
+    /* On touch devices the on-screen fire/respawn buttons cover these actions,
+       so hide the desktop button strip to give the FOV more room. */
+    body.touch #controls > .ctl:last-child { display: none; }
+
+    #crosshair { width: 64px; height: 64px; }
+    #spawn-editor .panel { width: 94vw; padding: 14px 16px; }
+    #spawn-editor h2 { font-size: 15px; }
+    #spawn-editor p { font-size: 11px; }
+    #spawn-editor .row label { width: 78px; }
+    #start .panel { padding: 18px 18px; max-width: 92vw; }
+    #start h2 { font-size: 18px; }
+    #start p { font-size: 12px; }
+    #start .key { font-size: 10px; padding: 3px 7px; }
+  }
 
   #loading {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -238,6 +317,11 @@
     </div>
   </div>
 
+  <div id="touch-controls">
+    <button id="respawn-btn" type="button">Новое</button>
+    <button id="fire-btn" type="button">ОГОНЬ</button>
+  </div>
+
   <div id="loading">
     <div class="ring"></div>
     <div class="label" id="loading-label">Загрузка ассетов…</div>
@@ -267,10 +351,15 @@
     <div class="panel">
       <h2>BETRUNKEN</h2>
       <p>Сбей яблоко с кружки. Прицел плавает — это всё хмель. Целься в центр и стреляй болтом из арбалета.</p>
-      <div class="keys">
+      <div class="keys" id="keys-desktop">
         <div class="key"><b>ЛКМ</b> / <b>Space</b> — выстрел</div>
         <div class="key"><b>Мышь</b> — целиться</div>
         <div class="key"><b>R</b> — новое яблоко</div>
+      </div>
+      <div class="keys" id="keys-touch" style="display:none">
+        <div class="key"><b>Палец</b> — целиться</div>
+        <div class="key"><b>ОГОНЬ</b> — выстрел</div>
+        <div class="key"><b>Новое</b> — респаун</div>
       </div>
       <button id="start-btn">Начать</button>
     </div>
@@ -410,14 +499,33 @@ const AudioFx = (() => {
 // Scene setup
 // ---------------------------------------------------------------------------
 const app = document.getElementById('app');
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+// Mobile / touch detection — used to tune renderer quality and to enable
+// touch-only HUD elements (fire button, respawn button) and touch input.
+const IS_TOUCH = (typeof window !== 'undefined') &&
+  (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
+const IS_SMALL = Math.min(window.innerWidth, window.innerHeight) < 820;
+const IS_MOBILE = IS_TOUCH && IS_SMALL;
+if (IS_TOUCH) {
+  document.body.classList.add('touch');
+  const kd = document.getElementById('keys-desktop');
+  const kt = document.getElementById('keys-touch');
+  if (kd) kd.style.display = 'none';
+  if (kt) kt.style.display = 'flex';
+}
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: !IS_MOBILE,
+  alpha: false,
+  powerPreference: IS_MOBILE ? 'low-power' : 'high-performance',
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_MOBILE ? 1.25 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !IS_MOBILE;
+renderer.shadowMap.type = IS_MOBILE ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -466,14 +574,14 @@ scene.add(hemi);
 
 const fire = new THREE.PointLight(0xffa040, 4.2, 14, 1.8);
 fire.position.set(-3.0, 1.2, -1.5);
-fire.castShadow = true;
-fire.shadow.mapSize.set(512, 512);
+fire.castShadow = !IS_MOBILE;
+fire.shadow.mapSize.set(IS_MOBILE ? 256 : 512, IS_MOBILE ? 256 : 512);
 scene.add(fire);
 
 const window_light = new THREE.DirectionalLight(0xffe1b3, 1.3);
 window_light.position.set(3, 5, -2);
 window_light.castShadow = true;
-window_light.shadow.mapSize.set(1024, 1024);
+window_light.shadow.mapSize.set(IS_MOBILE ? 512 : 1024, IS_MOBILE ? 512 : 1024);
 window_light.shadow.camera.left = -6;
 window_light.shadow.camera.right = 6;
 window_light.shadow.camera.top = 6;
@@ -603,11 +711,15 @@ window.addEventListener('mousemove', e => {
   state.aim.x = (e.clientX / window.innerWidth) * 2 - 1;
   state.aim.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
+function isHudTarget(t) {
+  return t && (t.closest('.ctl') || t.closest('.hud-card') ||
+               t.closest('#touch-controls') || t.closest('#spawn-editor') ||
+               t.closest('#start') || t.tagName === 'BUTTON');
+}
 window.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
   if (document.getElementById('start').style.display !== 'none') return;
-  // Ignore clicks on HUD controls
-  if (e.target.closest('.ctl') || e.target.closest('.hud-card') || e.target.tagName === 'BUTTON') return;
+  if (isHudTarget(e.target)) return;
   tryShoot();
 });
 window.addEventListener('keydown', e => {
@@ -615,6 +727,45 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
   if (e.code === 'KeyR') { respawnApple(); }
 });
+
+// Touch input — drag anywhere on the canvas to move the reticle (same
+// absolute mapping as the mouse). The fire and respawn buttons are
+// separate DOM elements; everything else is aim drag.
+function handleTouchAim(e) {
+  if (!e.touches || e.touches.length === 0) return;
+  // Skip if the initial target is a HUD element — the user is interacting
+  // with sliders or buttons, not aiming.
+  if (isHudTarget(e.target)) return;
+  const t = e.touches[0];
+  state.aim.x = (t.clientX / window.innerWidth) * 2 - 1;
+  state.aim.y = -((t.clientY / window.innerHeight) * 2 - 1);
+  if (e.cancelable) e.preventDefault();
+}
+window.addEventListener('touchstart', handleTouchAim, { passive: false });
+window.addEventListener('touchmove',  handleTouchAim, { passive: false });
+
+const fireBtn = document.getElementById('fire-btn');
+if (fireBtn) {
+  const onFire = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (document.getElementById('start').style.display !== 'none') return;
+    tryShoot();
+  };
+  fireBtn.addEventListener('touchstart', onFire, { passive: false });
+  fireBtn.addEventListener('click', onFire);
+}
+const respawnBtn = document.getElementById('respawn-btn');
+if (respawnBtn) {
+  const onRespawn = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (document.getElementById('start').style.display !== 'none') return;
+    respawnApple();
+  };
+  respawnBtn.addEventListener('touchstart', onRespawn, { passive: false });
+  respawnBtn.addEventListener('click', onRespawn);
+}
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
