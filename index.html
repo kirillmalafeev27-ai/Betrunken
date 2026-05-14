@@ -145,6 +145,16 @@
     body.touch #controls > .ctl:last-child { display: none; }
 
     #crosshair { width: 64px; height: 64px; }
+    #bonus-bar {
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+      gap: 4px;
+    }
+    .bonus-tile { min-width: 56px; padding: 4px 5px 3px; }
+    .bonus-tile .title { font-size: 9px; margin-bottom: 2px; }
+    .bonus-tile .sub { width: 9px; height: 9px; }
+    #ammo { top: 8px; padding: 4px 8px; font-size: 11px; gap: 5px; }
+    #ammo .dot { width: 5px; height: 14px; }
+    #streak-pop .burst { font-size: 26px; padding: 10px 18px; }
     #spawn-editor .panel { width: 94vw; padding: 14px 16px; }
     #spawn-editor h2 { font-size: 15px; }
     #spawn-editor p { font-size: 11px; }
@@ -212,6 +222,202 @@
   #score-pop.z-center { color: #ffd45a; }
   #score-pop.z-mid    { color: var(--accent); }
   #score-pop.z-outer  { color: #b9b1a0; }
+
+  /* Bonus bar — 5 category tiles each containing a row of sub-quads.
+     The rightmost sub-quad (position 1) drains first; opacity fades to 0
+     as its share of the timer runs out. */
+  #bonus-bar {
+    position: absolute;
+    left: 50%;
+    bottom: 70px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 5;
+    pointer-events: auto;
+  }
+  .bonus-tile {
+    background: rgba(20,18,16,0.78);
+    border: 1.5px solid rgba(200,144,96,0.22);
+    border-radius: 10px;
+    padding: 6px 8px 5px;
+    min-width: 84px;
+    color: var(--text);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, transform 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bonus-tile:hover { border-color: rgba(200,144,96,0.55); }
+  .bonus-tile.selected {
+    border-color: var(--accent);
+    background: rgba(60,42,28,0.85);
+    box-shadow: 0 0 14px rgba(200,144,96,0.35);
+  }
+  .bonus-tile .title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .bonus-tile.selected .title { color: var(--accent); }
+  .bonus-tile .subs {
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+  }
+  .bonus-tile .sub {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    background: var(--accent);
+    border: 1px solid rgba(255,220,180,0.35);
+    transition: opacity 0.15s, background 0.15s, transform 0.12s;
+  }
+  .bonus-tile .sub.locked {
+    background: #3a3733;
+    border-color: rgba(255,255,255,0.08);
+    opacity: 0.4;
+  }
+  .bonus-tile .sub.empty { opacity: 0; }
+
+  /* Sub-bonus picker — opens after a hit on the selected category */
+  #sub-picker {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10,9,8,0.45);
+    backdrop-filter: blur(3px);
+    z-index: 60;
+    pointer-events: auto;
+  }
+  #sub-picker.on { display: flex; }
+  #sub-picker .panel {
+    background: var(--panel);
+    border: 1px solid rgba(200,144,96,0.28);
+    border-radius: 12px;
+    padding: 18px 20px;
+    min-width: 260px;
+    max-width: 92vw;
+    box-shadow: 0 10px 36px rgba(0,0,0,0.55);
+  }
+  #sub-picker h3 { margin: 0 0 4px; color: var(--accent); font-size: 14px; letter-spacing: 1px; text-align: center; }
+  #sub-picker .hint { margin: 0 0 12px; color: var(--text-dim); font-size: 11px; text-align: center; }
+  #sub-picker .options { display: flex; flex-direction: column; gap: 8px; }
+  #sub-picker .opt {
+    background: var(--panel-2);
+    border: 1px solid #3a3733;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  #sub-picker .opt:hover { background: #3a3733; border-color: var(--accent); }
+  #sub-picker .opt .name { font-weight: 600; color: var(--accent); }
+  #sub-picker .opt .desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  #sub-picker .skip {
+    margin-top: 10px;
+    background: none;
+    color: var(--text-dim);
+    border: none;
+    font-size: 11px;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Ammo strip — 4 bolt dots, plus a reload button when empty */
+  #ammo {
+    position: absolute;
+    top: 14px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(20,18,16,0.72);
+    border: 1px solid rgba(200,144,96,0.15);
+    border-radius: 10px;
+    padding: 6px 12px;
+    color: var(--text);
+    font-size: 12px;
+    z-index: 5;
+    backdrop-filter: blur(6px);
+  }
+  #ammo .label { color: var(--text-dim); font-size: 10px; letter-spacing: 1px; margin-right: 2px; }
+  #ammo .dot {
+    width: 6px; height: 18px;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: opacity 0.15s, background 0.15s;
+  }
+  #ammo .dot.spent { background: #3a3733; opacity: 0.5; }
+  #ammo #reload-btn {
+    display: none;
+    margin-left: 6px;
+    font-size: 11px; font-weight: 700;
+    padding: 4px 10px;
+    background: rgba(200,80,60,0.85);
+    color: #fff8ec;
+    border: 1px solid rgba(255,220,180,0.4);
+    border-radius: 6px;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+  }
+  #ammo #reload-btn.on { display: inline-block; }
+  #ammo #reload-btn:hover { background: rgba(230,110,80,0.95); }
+
+  /* Comic-book streak popup — center screen flash with sparkles */
+  #streak-pop {
+    position: absolute;
+    top: 36%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.6) rotate(-6deg);
+    pointer-events: none;
+    z-index: 7;
+    opacity: 0;
+    transition: opacity 0.18s ease-out, transform 0.5s cubic-bezier(0.18, 1.6, 0.42, 1.05);
+    text-align: center;
+  }
+  #streak-pop.on {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) rotate(-6deg);
+  }
+  #streak-pop .burst {
+    display: inline-block;
+    padding: 14px 28px;
+    background: radial-gradient(circle, #ffd45a 0%, #ff8a3c 55%, #c44a1a 100%);
+    color: #1a0e04;
+    font-weight: 900;
+    font-size: 38px;
+    letter-spacing: 1px;
+    border-radius: 16px;
+    border: 4px solid #fff8ec;
+    box-shadow: 0 0 0 4px #1a0e04, 0 14px 36px rgba(0,0,0,0.55), 0 0 60px rgba(255,200,80,0.55);
+    text-shadow: 0 2px 0 #fff8ec, 0 -1px 0 rgba(0,0,0,0.4);
+    transform: skew(-6deg);
+  }
+  #streak-pop .sub {
+    margin-top: 6px;
+    color: #ffd45a;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+  }
+  #streak-pop .spark {
+    position: absolute;
+    width: 8px; height: 8px;
+    background: #fff8ec;
+    border-radius: 50%;
+    box-shadow: 0 0 10px #ffd45a, 0 0 18px #ff8a3c;
+    animation: spark 0.7s ease-out forwards;
+  }
+  @keyframes spark {
+    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) scale(0.2); opacity: 0; }
+  }
 
   #flash {
     position: absolute; inset: 0; pointer-events: none;
@@ -300,6 +506,27 @@
   <div id="flash"></div>
   <div id="crosshair"><div class="ring"></div></div>
   <div id="score-pop"></div>
+  <div id="streak-pop"></div>
+
+  <div id="ammo">
+    <span class="label">БОЛТЫ</span>
+    <div class="dot" data-i="0"></div>
+    <div class="dot" data-i="1"></div>
+    <div class="dot" data-i="2"></div>
+    <div class="dot" data-i="3"></div>
+    <button id="reload-btn" type="button">ПЕРЕЗАРЯД</button>
+  </div>
+
+  <div id="bonus-bar"></div>
+
+  <div id="sub-picker">
+    <div class="panel">
+      <h3 id="sp-title">ВЫБЕРИ ПОДБОНУС</h3>
+      <p class="hint">Доступны только подсвеченные.</p>
+      <div class="options" id="sp-options"></div>
+      <button class="skip" id="sp-skip" type="button">Пропустить</button>
+    </div>
+  </div>
 
   <div id="hud">
     <div class="hud-card">
@@ -672,6 +899,12 @@ const state = {
   shots: 0,
   hits: 0,
   score: 0,
+  streak: 0,         // consecutive hits — drives the streak popup
+  bestStreak: 0,
+  boltsLeft: 4,      // hard cap of 4 bolts per run; reload button refills
+  bonusTiles: [],    // initialised below from BONUS_CATEGORIES
+  selectedTileId: null, // tile that's "armed" for the next hit (will open picker)
+  claimedSubs: [],   // [{tileId, subId, t}] log of picked sub-bonuses (no effect yet)
   lastZone: null,    // 'center' | 'mid' | 'outer' — set briefly after a hit
   lastZoneAt: -10,   // state.t when lastZone was set (for HUD flash fade)
   bolts: [],         // active flying bolts
@@ -748,7 +981,252 @@ function showScorePop(points, zone) {
   _scorePopTimer = setTimeout(() => el.classList.remove('on'), 700);
 }
 
-$('reset').addEventListener('click', () => { state.shots = 0; state.hits = 0; state.score = 0; updateStats(); });
+// ---------------------------------------------------------------------------
+// Bonuses, ammo, streak — phase-1 scaffolding (no effects yet, just selection,
+// timer drain, regen on hit / decay on miss, and the streak popup).
+// ---------------------------------------------------------------------------
+// Each tile lists its subs LEFT→RIGHT. Position 1 = RIGHTMOST sub-quad and
+// drains first when the timer runs out. The number printed in each comment
+// matches the position notation in the design doc.
+const BONUS_CATEGORIES = [
+  { id: 'breath', title: 'Дыхание', subs: [
+      { id: 'zeitlupe', pos: 3, name: 'Zeitlupe',      desc: '×0.3 мир на 2 сек (ПКМ)' },
+      { id: 'anker',    pos: 2, name: 'Anker',         desc: 'шатание только по одной оси на 1 выстрел' },
+      { id: 'atem',     pos: 1, name: 'Atem anhalten', desc: '−50% опьянения/дрейфа на 4 сек (нужна серия 2+)', requiresStreak: 2 },
+  ]},
+  { id: 'aim', title: 'Прицел', subs: [
+      { id: 'leuchtspur', pos: 4, name: 'Leuchtspur', desc: 'видна траектория болта пунктиром' },
+      { id: 'zoom',       pos: 3, name: 'Zoom',       desc: 'приближение, точность выше' },
+      { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'болт чуть-чуть магнитится к цели' },
+      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'яблоко ×1.5 на следующий выстрел' },
+  ]},
+  { id: 'res', title: 'Ресурсы', subs: [
+      { id: 'schnaps', pos: 3, name: 'Schnaps', desc: '+болты, шатание ×N на 5 сек' },
+      { id: 'kocher',  pos: 2, name: 'Köcher +2', desc: 'два болта в запас' },
+      { id: 'zinsen',  pos: 1, name: 'Zinsen',  desc: 'следующее попадание — двойной выбор' },
+  ]},
+  { id: 'def', title: 'Защита', subs: [
+      { id: 'geduld', pos: 3, name: 'Geduld', desc: 'таймер бездействия ×2 на 30 сек' },
+      { id: 'schild', pos: 2, name: 'Schild', desc: 'следующий debuff-тик игнорируется' },
+      { id: 'kaffee', pos: 1, name: 'Kaffee', desc: 'сбрасывает все debuff' },
+  ]},
+  { id: 'info', title: 'Чтение', subs: [
+      { id: 'rhythmus',  pos: 4, name: 'Rhythmus',    desc: 'метроном, синхронный с шатанием' },
+      { id: 'geist',     pos: 3, name: 'Geist-Pfeil', desc: 'призрачный болт-телеграф' },
+      { id: 'doppel',    pos: 2, name: 'Doppelschuss',desc: 'два болта подряд без перезарядки' },
+      { id: 'vorahnung', pos: 1, name: 'Vorahnung',   desc: 'на 1 выстрел видно толчок камеры' },
+  ]},
+];
+
+// Tile timer model: each tile has `t` in [0..N], where N = sub-count.
+// At t == N, all sub-quads are fully bright. As t decreases, the RIGHTMOST
+// sub-quad fades first (linearly). When t crosses i, sub-quad at column i
+// becomes fully empty. So opacity for the sub at LEFT-index i = clamp(t - i, 0, 1).
+const TILE_DRAIN_RATE = 0.13;  // sub-quads per second — full tile drains in ~N/0.13 sec
+const TILE_MISS_PENALTY = 0.5; // half a sub-quad per miss
+const TILE_HIT_REGEN_FRAC = 0.5; // hit refills to >= 50% of N
+
+state.bonusTiles = BONUS_CATEGORIES.map(cat => ({
+  id: cat.id,
+  title: cat.title,
+  subs: cat.subs.slice(),  // left→right
+  t: cat.subs.length,      // start full
+}));
+
+function renderBonusBar() {
+  const bar = document.getElementById('bonus-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  for (const tile of state.bonusTiles) {
+    const el = document.createElement('div');
+    el.className = 'bonus-tile';
+    el.dataset.id = tile.id;
+    if (state.selectedTileId === tile.id) el.classList.add('selected');
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = tile.title;
+    el.appendChild(title);
+    const subs = document.createElement('div');
+    subs.className = 'subs';
+    for (let i = 0; i < tile.subs.length; i++) {
+      const s = document.createElement('div');
+      s.className = 'sub';
+      s.dataset.i = String(i);
+      subs.appendChild(s);
+    }
+    el.appendChild(subs);
+    el.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      state.selectedTileId = (state.selectedTileId === tile.id) ? null : tile.id;
+      renderBonusBar();
+      markInput();
+    });
+    bar.appendChild(el);
+  }
+  updateBonusOpacities();
+}
+
+function updateBonusOpacities() {
+  const bar = document.getElementById('bonus-bar');
+  if (!bar) return;
+  const tiles = bar.querySelectorAll('.bonus-tile');
+  tiles.forEach(tileEl => {
+    const id = tileEl.dataset.id;
+    const tile = state.bonusTiles.find(t => t.id === id);
+    if (!tile) return;
+    const subEls = tileEl.querySelectorAll('.sub');
+    subEls.forEach((sub, i) => {
+      const op = Math.max(0, Math.min(1, tile.t - i));
+      sub.style.opacity = String(op);
+      sub.classList.toggle('empty', op <= 0.001);
+    });
+  });
+}
+
+function tickBonusTimers(dt) {
+  for (const tile of state.bonusTiles) {
+    if (tile.t > 0) tile.t = Math.max(0, tile.t - TILE_DRAIN_RATE * dt);
+  }
+  updateBonusOpacities();
+}
+
+function onBonusMiss() {
+  for (const tile of state.bonusTiles) {
+    tile.t = Math.max(0, tile.t - TILE_MISS_PENALTY);
+  }
+  updateBonusOpacities();
+}
+
+function onBonusHit() {
+  for (const tile of state.bonusTiles) {
+    const halfFull = tile.subs.length * TILE_HIT_REGEN_FRAC;
+    if (tile.t < halfFull) tile.t = halfFull;
+  }
+  updateBonusOpacities();
+}
+
+// Sub-picker — opens after a hit if a tile is armed and has live subs.
+function availableSubs(tile) {
+  // A sub-quad at LEFT-index i is "live" if its opacity is >= 0.4 (the
+  // rightmost ones drain first, so this also enforces the hierarchy).
+  const live = [];
+  for (let i = 0; i < tile.subs.length; i++) {
+    const op = Math.max(0, Math.min(1, tile.t - i));
+    if (op >= 0.4) {
+      const sub = tile.subs[i];
+      if (sub.requiresStreak && state.streak < sub.requiresStreak) continue;
+      live.push(sub);
+    }
+  }
+  return live;
+}
+
+function openSubPicker(tileId) {
+  const tile = state.bonusTiles.find(t => t.id === tileId);
+  if (!tile) return false;
+  const live = availableSubs(tile);
+  if (live.length === 0) return false;
+  const panel = document.getElementById('sub-picker');
+  const opts = document.getElementById('sp-options');
+  const titleEl = document.getElementById('sp-title');
+  titleEl.textContent = 'БОНУС: ' + tile.title.toUpperCase();
+  opts.innerHTML = '';
+  for (const sub of live) {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    b.type = 'button';
+    b.innerHTML = '<div class="name">' + sub.name + '</div><div class="desc">' + sub.desc + '</div>';
+    b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      state.claimedSubs.push({ tileId, subId: sub.id, t: state.t });
+      // Consume one sub-quad from this tile so the player doesn't double-dip.
+      tile.t = Math.max(0, tile.t - 1);
+      closeSubPicker();
+      renderBonusBar();
+    });
+    opts.appendChild(b);
+  }
+  panel.classList.add('on');
+  return true;
+}
+function closeSubPicker() {
+  const panel = document.getElementById('sub-picker');
+  if (panel) panel.classList.remove('on');
+}
+
+// Ammo display
+function updateAmmo() {
+  const dots = document.querySelectorAll('#ammo .dot');
+  dots.forEach((d, i) => {
+    d.classList.toggle('spent', i >= state.boltsLeft);
+  });
+  const reload = document.getElementById('reload-btn');
+  if (reload) reload.classList.toggle('on', state.boltsLeft <= 0);
+}
+function reloadBolts() {
+  state.boltsLeft = 4;
+  for (const tile of state.bonusTiles) tile.t = tile.subs.length;
+  state.streak = 0;
+  state.selectedTileId = null;
+  renderBonusBar();
+  updateAmmo();
+}
+
+// Streak popup — comic-book burst with sparks
+let _streakTimer = null;
+function showStreakPop(n) {
+  const el = document.getElementById('streak-pop');
+  if (!el) return;
+  el.innerHTML = '';
+  const burst = document.createElement('div');
+  burst.className = 'burst';
+  burst.textContent = '×' + n + '!';
+  el.appendChild(burst);
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  sub.textContent = 'STREAK';
+  el.appendChild(sub);
+  // Sparks
+  for (let i = 0; i < 10; i++) {
+    const s = document.createElement('span');
+    s.className = 'spark';
+    const a = (i / 10) * Math.PI * 2;
+    const r = 90 + Math.random() * 40;
+    s.style.setProperty('--dx', Math.cos(a) * r + 'px');
+    s.style.setProperty('--dy', Math.sin(a) * r + 'px');
+    s.style.left = '50%';
+    s.style.top = '50%';
+    s.style.animationDelay = (i * 0.02) + 's';
+    el.appendChild(s);
+  }
+  el.classList.remove('on');
+  void el.offsetWidth;
+  el.classList.add('on');
+  clearTimeout(_streakTimer);
+  _streakTimer = setTimeout(() => el.classList.remove('on'), 1100);
+  // Audio: reuse hit sound stacked for a bigger pop
+  try { AudioFx.hit(); AudioFx.hit(); } catch (_) {}
+}
+
+document.getElementById('reload-btn').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  reloadBolts();
+});
+document.getElementById('sp-skip').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  closeSubPicker();
+});
+
+renderBonusBar();
+updateAmmo();
+
+$('reset').addEventListener('click', () => {
+  state.shots = 0; state.hits = 0; state.score = 0;
+  state.streak = 0; state.bestStreak = 0;
+  state.claimedSubs.length = 0;
+  reloadBolts();
+  updateStats();
+});
 $('respawn').addEventListener('click', respawnApple);
 
 // ---------------------------------------------------------------------------
@@ -763,7 +1241,9 @@ window.addEventListener('mousemove', e => {
 function isHudTarget(t) {
   return t && (t.closest('.ctl') || t.closest('.hud-card') ||
                t.closest('#touch-controls') || t.closest('#spawn-editor') ||
-               t.closest('#start') || t.tagName === 'BUTTON');
+               t.closest('#start') || t.closest('#bonus-bar') ||
+               t.closest('#sub-picker') || t.closest('#ammo') ||
+               t.tagName === 'BUTTON');
 }
 window.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
@@ -1318,6 +1798,11 @@ function closeSpawnEditor() {
 function tryShoot() {
   if (!state.boltTemplate) return;
   if (!state.canShoot) return;
+  const picker = document.getElementById('sub-picker');
+  if (picker && picker.classList.contains('on')) return;
+  if (state.boltsLeft <= 0) { AudioFx.miss(); return; }
+  state.boltsLeft--;
+  updateAmmo();
   state.canShoot = false;
   setTimeout(() => state.canShoot = true, 500);
 
@@ -1658,12 +2143,21 @@ function tick() {
         if (b.hitAppleIdx >= 0 && b.hitAppleIdx < state.apples.length) {
           state.hits++;
           state.score += b.hitPoints || 0;
+          state.streak++;
+          if (state.streak > state.bestStreak) state.bestStreak = state.streak;
           state.lastZone = b.hitZone;
           state.lastZoneAt = state.t;
           updateStats();
           showScorePop(b.hitPoints, b.hitZone);
           AudioFx.hit();
           shatterApple(b.hitAppleIdx, b.hitPoint, b.dir);
+          onBonusHit();
+          if (state.streak >= 2) showStreakPop(state.streak);
+          if (state.selectedTileId) {
+            // Try to open the sub-picker for the armed tile. If the tile has
+            // no live subs (timer drained / streak-locked sub), silently skip.
+            openSubPicker(state.selectedTileId);
+          }
         }
         // Remove bolt shortly after impact.
         b.life = 0.05;
@@ -1681,6 +2175,8 @@ function tick() {
       if (!b.willHit) {
         AudioFx.miss();
         b.missPlayed = true;
+        state.streak = 0;
+        onBonusMiss();
       }
     }
   }
@@ -1735,6 +2231,9 @@ function tick() {
 
   // Soft fireplace flicker
   fire.intensity = 3.6 + Math.sin(t * 9.0) * 0.6 + Math.sin(t * 17) * 0.3;
+
+  // Bonus tile drain
+  tickBonusTimers(dt);
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
