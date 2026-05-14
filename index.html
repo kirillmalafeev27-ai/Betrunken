@@ -257,6 +257,7 @@
       <div class="list" id="se-list"></div>
       <div class="actions">
         <button id="se-clear" class="secondary">Очистить</button>
+        <button id="se-default" class="secondary">Дефолтные яблоки</button>
         <button id="se-start" class="primary">Закрыть</button>
       </div>
     </div>
@@ -1085,6 +1086,12 @@ function openSpawnEditor() {
       renderSpawnList();
       renderEditorGhosts();
     });
+    document.getElementById('se-default').addEventListener('click', () => {
+      state.spawns = DEFAULT_SPAWNS.map(s => ({ ...s }));
+      saveSpawnsToStorage();
+      renderSpawnList();
+      renderEditorGhosts();
+    });
     document.getElementById('se-start').addEventListener('click', () => {
       closeSpawnEditor();
       // Re-roll the live apple onto one of the (possibly edited) spawns.
@@ -1333,7 +1340,7 @@ function tick() {
   // Asymmetric yaw: leftward pan is clamped near the right edge of the
   // fireplace (which sits around world x≈-2 from the camera), so the view
   // can't drift off the scene on that side.
-  const AIM_YAW_LEFT  = 0.45;   // max additional yaw when looking left
+  const AIM_YAW_LEFT  = 0.65;   // max additional yaw when looking left
   const AIM_YAW_RIGHT = 0.85;   // max additional yaw when looking right
   const AIM_PITCH = 0.55;   // max pitch
   const camAimX = state.aim.x >= 0
