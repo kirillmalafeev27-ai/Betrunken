@@ -194,6 +194,25 @@
     border-radius: 50%;
   }
 
+  /* Floating "+N" hit feedback near the crosshair. Color hints the zone:
+     gold = center (10), accent = mid (5), dim = outer (2). */
+  #score-pop {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -130%);
+    font-size: 28px; font-weight: 700; letter-spacing: 1px;
+    color: var(--accent);
+    text-shadow: 0 2px 6px rgba(0,0,0,0.75), 0 0 12px rgba(0,0,0,0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease-out, transform 0.5s ease-out;
+    z-index: 6;
+    font-variant-numeric: tabular-nums;
+  }
+  #score-pop.on { opacity: 1; transform: translate(-50%, -210%); }
+  #score-pop.z-center { color: #ffd45a; }
+  #score-pop.z-mid    { color: var(--accent); }
+  #score-pop.z-outer  { color: #b9b1a0; }
+
   #flash {
     position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(circle at center, rgba(255,220,150,0.0) 0%, rgba(255,220,150,0) 60%);
@@ -280,6 +299,7 @@
 <div id="app">
   <div id="flash"></div>
   <div id="crosshair"><div class="ring"></div></div>
+  <div id="score-pop"></div>
 
   <div id="hud">
     <div class="hud-card">
@@ -287,7 +307,7 @@
       <div class="sub">арбалет · таверна · яблоко</div>
     </div>
     <div class="hud-card stats">
-      выстрелов: <b id="shots">0</b> &nbsp;·&nbsp; попаданий: <b id="hits">0</b> &nbsp;·&nbsp; <span id="acc">—</span>
+      выстрелов: <b id="shots">0</b> &nbsp;·&nbsp; попаданий: <b id="hits">0</b> &nbsp;·&nbsp; <span id="acc">—</span> &nbsp;·&nbsp; очки: <b id="score">0</b>
     </div>
   </div>
 
@@ -651,6 +671,9 @@ function computeBBox(obj) {
 const state = {
   shots: 0,
   hits: 0,
+  score: 0,
+  lastZone: null,    // 'center' | 'mid' | 'outer' — set briefly after a hit
+  lastZoneAt: -10,   // state.t when lastZone was set (for HUD flash fade)
   bolts: [],         // active flying bolts
   fragments: [],     // apple fragments after a hit
   spawns: [],        // user-defined spawn points: {x, y, z, size}
@@ -705,9 +728,27 @@ function updateStats() {
   $('shots').textContent = state.shots;
   $('hits').textContent = state.hits;
   $('acc').textContent = state.shots ? Math.round(state.hits / state.shots * 100) + '%' : '—';
+  $('score').textContent = state.score;
 }
 
-$('reset').addEventListener('click', () => { state.shots = 0; state.hits = 0; updateStats(); });
+let _scorePopTimer = null;
+function showScorePop(points, zone) {
+  const el = document.getElementById('score-pop');
+  if (!el) return;
+  el.textContent = '+' + points;
+  el.classList.remove('z-center', 'z-mid', 'z-outer');
+  if (zone === 'center')      el.classList.add('z-center');
+  else if (zone === 'mid')    el.classList.add('z-mid');
+  else if (zone === 'outer')  el.classList.add('z-outer');
+  // Force a reflow so the transition restarts even on rapid back-to-back hits.
+  el.classList.remove('on');
+  void el.offsetWidth;
+  el.classList.add('on');
+  clearTimeout(_scorePopTimer);
+  _scorePopTimer = setTimeout(() => el.classList.remove('on'), 700);
+}
+
+$('reset').addEventListener('click', () => { state.shots = 0; state.hits = 0; state.score = 0; updateStats(); });
 $('respawn').addEventListener('click', respawnApple);
 
 // ---------------------------------------------------------------------------
@@ -1360,9 +1401,13 @@ function tryShoot() {
 
   // Hit test: ray vs every live apple sphere. Pick the nearest hit so the
   // bolt resolves on the closest apple along its path.
+  // Also record HOW close to the apple's center the bolt passes — this drives
+  // the hidden darts-style scoring (10 / 5 / 2 from inner ring outward).
   let willHit = false;
   let hitPoint = null;
   let hitAppleIdx = -1;
+  let hitZone = null;
+  let hitPoints = 0;
   let bestT = Infinity;
   for (let i = 0; i < state.apples.length; i++) {
     const hb = state.apples[i].hitbox;
@@ -1377,6 +1422,13 @@ function tryShoot() {
       hitAppleIdx = i;
       hitPoint = startPos.clone().add(dir.clone().multiplyScalar(t));
       willHit = true;
+      // Off-center distance: perpendicular distance from the ray to the
+      // sphere center, normalized by the sphere radius (0 = bullseye, 1 = grazing edge).
+      const perpDist = Math.sqrt(Math.max(0, oc.dot(oc) - b * b));
+      const r = perpDist / hb.radius;
+      if (r < 0.33)      { hitZone = 'center'; hitPoints = 10; }
+      else if (r < 0.66) { hitZone = 'mid';    hitPoints = 5;  }
+      else               { hitZone = 'outer';  hitPoints = 2;  }
     }
   }
 
@@ -1389,6 +1441,8 @@ function tryShoot() {
     willHit,
     hitPoint,
     hitAppleIdx,
+    hitZone,
+    hitPoints,
     resolved: false,
   });
 }
@@ -1602,7 +1656,12 @@ function tick() {
         // Only fire the hit if the targeted apple is still alive — it may
         // have been shattered by an earlier in-flight bolt.
         if (b.hitAppleIdx >= 0 && b.hitAppleIdx < state.apples.length) {
-          state.hits++; updateStats();
+          state.hits++;
+          state.score += b.hitPoints || 0;
+          state.lastZone = b.hitZone;
+          state.lastZoneAt = state.t;
+          updateStats();
+          showScorePop(b.hitPoints, b.hitZone);
           AudioFx.hit();
           shatterApple(b.hitAppleIdx, b.hitPoint, b.dir);
         }
