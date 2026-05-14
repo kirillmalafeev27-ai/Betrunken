@@ -64,6 +64,7 @@
   }
   .ctl label { color: var(--text-dim); }
   .ctl input[type=range] { accent-color: var(--accent); width: 110px; }
+  .ctl input#s-drunk { width: 220px; }
   .ctl .val { font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
   button {
     background: var(--panel-2);
@@ -136,6 +137,7 @@
     .ctl { padding: 5px 8px; gap: 6px; font-size: 11px; border-radius: 8px; }
     .ctl label { display: none; }
     .ctl input[type=range] { width: 72px; }
+    .ctl input#s-drunk { width: 140px; }
     .ctl .val { min-width: 24px; font-size: 10px; }
     .ctl button { padding: 5px 8px; font-size: 11px; }
     /* On touch devices the on-screen fire/respawn buttons cover these actions,
@@ -292,7 +294,7 @@
   <div id="controls">
     <div class="ctl">
       <label>Опьянение</label>
-      <input id="s-drunk" type="range" min="0" max="3" step="0.05" value="1.0">
+      <input id="s-drunk" type="range" min="0" max="5" step="0.05" value="1.0">
       <span class="val" id="s-drunk-v">1.00</span>
     </div>
     <div class="ctl">
@@ -679,6 +681,10 @@ const state = {
   shooting: false,
   canShoot: true,
   t: 0,
+  lastInputTime: 0,   // seconds (state.t) of the last player input — used to
+                      // trigger the idle camera drift after 5s of inactivity.
+  idleDrift: 0,       // accumulated pitch offset from the idle drift, applied
+                      // directly to camera.rotation.x (no spring damping).
 };
 
 // ---------------------------------------------------------------------------
@@ -707,9 +713,11 @@ $('respawn').addEventListener('click', respawnApple);
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
+function markInput() { state.lastInputTime = state.t; }
 window.addEventListener('mousemove', e => {
   state.aim.x = (e.clientX / window.innerWidth) * 2 - 1;
   state.aim.y = -((e.clientY / window.innerHeight) * 2 - 1);
+  markInput();
 });
 function isHudTarget(t) {
   return t && (t.closest('.ctl') || t.closest('.hud-card') ||
@@ -718,12 +726,14 @@ function isHudTarget(t) {
 }
 window.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
+  markInput();
   if (document.getElementById('start').style.display !== 'none') return;
   if (isHudTarget(e.target)) return;
   tryShoot();
 });
 window.addEventListener('keydown', e => {
   if (document.getElementById('start').style.display !== 'none') return;
+  markInput();
   if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
   if (e.code === 'KeyR') { respawnApple(); }
 });
@@ -739,6 +749,7 @@ function handleTouchAim(e) {
   const t = e.touches[0];
   state.aim.x = (t.clientX / window.innerWidth) * 2 - 1;
   state.aim.y = -((t.clientY / window.innerHeight) * 2 - 1);
+  markInput();
   if (e.cancelable) e.preventDefault();
 }
 window.addEventListener('touchstart', handleTouchAim, { passive: false });
@@ -750,6 +761,7 @@ if (fireBtn) {
     e.preventDefault();
     e.stopPropagation();
     if (document.getElementById('start').style.display !== 'none') return;
+    markInput();
     tryShoot();
   };
   fireBtn.addEventListener('touchstart', onFire, { passive: false });
@@ -761,6 +773,7 @@ if (respawnBtn) {
     e.preventDefault();
     e.stopPropagation();
     if (document.getElementById('start').style.display !== 'none') return;
+    markInput();
     respawnApple();
   };
   respawnBtn.addEventListener('touchstart', onRespawn, { passive: false });
@@ -1542,9 +1555,24 @@ function tick() {
   camera.position.z = CAMERA_BASE_POS.z + swayZ * state.cameraDrift * 0.15;
   camera.position.y = CAMERA_BASE_POS.y + swayY * state.cameraDrift * 0.07;
 
+  // Idle drift — after 5 s of no input, the camera slowly tilts down
+  // (and slightly drifts the yaw), as if the player's hand has gone slack.
+  // Applied directly to the final rotation, NOT through the aim spring,
+  // so it isn't damped or "fought" by the drunken sway feedback.
+  const IDLE_THRESHOLD = 5.0;      // seconds before drift starts
+  const IDLE_PITCH_RATE = 0.10;    // rad/s downward while idle
+  const idleSec = state.t - state.lastInputTime;
+  if (idleSec > IDLE_THRESHOLD) {
+    state.idleDrift += IDLE_PITCH_RATE * dt;
+    // Clamp so the camera doesn't roll past straight-down.
+    if (state.idleDrift > 1.2) state.idleDrift = 1.2;
+  } else {
+    state.idleDrift = 0;           // snap back instantly on any input
+  }
+
   // Compose final camera orientation.
   camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x;
-  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift;
 
   // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
   if (state.crossbowKick > 0) {
