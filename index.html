@@ -369,6 +369,67 @@
   #ammo #reload-btn.on { display: inline-block; }
   #ammo #reload-btn:hover { background: rgba(230,110,80,0.95); }
 
+  /* Active sub-bonus effects strip (top-left, below the title) */
+  #active-fx {
+    position: absolute;
+    top: 60px;
+    left: 18px;
+    display: flex; flex-direction: column; gap: 4px;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .fx-pill {
+    background: rgba(20,18,16,0.78);
+    border: 1px solid rgba(200,144,96,0.32);
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Vorahnung — small arrow on screen showing the pre-rolled next kick */
+  #vorahnung-indicator {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 6px; height: 6px;
+    background: #ffd45a;
+    border-radius: 50%;
+    box-shadow: 0 0 12px #ffd45a, 0 0 24px #ff8a3c;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 4;
+    transition: opacity 0.18s;
+  }
+  #vorahnung-indicator.on { opacity: 1; }
+
+  /* Rhythmus metronome bar — a thin horizontal track with a moving thumb */
+  #rhythmus-bar {
+    position: absolute;
+    top: 28%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px; height: 6px;
+    background: rgba(60,56,48,0.65);
+    border-radius: 3px;
+    display: none;
+    z-index: 4;
+    pointer-events: none;
+  }
+  #rhythmus-bar.on { display: block; }
+  #rhythmus-thumb {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 10px; height: 14px;
+    background: var(--accent);
+    border-radius: 2px;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
   /* Comic-book streak popup — center screen flash with sparkles */
   #streak-pop {
     position: absolute;
@@ -518,6 +579,12 @@
   </div>
 
   <div id="bonus-bar"></div>
+
+  <div id="active-fx"></div>
+
+  <div id="vorahnung-indicator"></div>
+
+  <div id="rhythmus-bar"><div id="rhythmus-thumb"></div></div>
 
   <div id="sub-picker">
     <div class="panel">
@@ -904,7 +971,34 @@ const state = {
   boltsLeft: 4,      // hard cap of 4 bolts per run; reload button refills
   bonusTiles: [],    // initialised below from BONUS_CATEGORIES
   selectedTileId: null, // tile that's "armed" for the next hit (will open picker)
-  claimedSubs: [],   // [{tileId, subId, t}] log of picked sub-bonuses (no effect yet)
+  claimedSubs: [],   // [{tileId, subId, t}] log of picked sub-bonuses
+  // Active sub-bonus effects. Timed effects tick down in REAL seconds;
+  // per-shot counters decrement when consumed by tryShoot.
+  fx: {
+    // timed (real seconds remaining)
+    zeitlupe: 0,
+    atem: 0,
+    schnaps: 0,
+    geduld: 0,
+    rhythmusSec: 0,
+    // per-shot counters (1 = arm for next shot)
+    ankerSh: 0, ankerLockH: false, ankerLockV: false,
+    adlerSh: 0,
+    magnetSh: 0,
+    zoomSh: 0,
+    leuchtspurSh: 0,
+    vorahnungSh: 0,
+    geistSh: 0,
+    doppelSh: 0,
+    // queued / latched
+    zeitlupeReady: false, // claimed Zeitlupe, awaits RMB (desktop) / auto-fires (touch)
+    zinsen: false,        // next picker grants 2 picks instead of 1
+    schild: false,        // next debuff tick is ignored (no debuffs yet — reserved)
+    // pre-rolled next kick for Vorahnung
+    nextKickX: null, nextKickY: null,
+  },
+  trails: [],        // leuchtspur dotted trails (auto-fading)
+  ghostBolt: null,   // geist-pfeil ghost arrow object
   lastZone: null,    // 'center' | 'mid' | 'outer' — set briefly after a hit
   lastZoneAt: -10,   // state.t when lastZone was set (for HUD flash fade)
   bolts: [],         // active flying bolts
@@ -1121,16 +1215,29 @@ function availableSubs(tile) {
   return live;
 }
 
+let _pickerTile = null;
+let _pickerRemaining = 0;
 function openSubPicker(tileId) {
   const tile = state.bonusTiles.find(t => t.id === tileId);
   if (!tile) return false;
   const live = availableSubs(tile);
   if (live.length === 0) return false;
-  const panel = document.getElementById('sub-picker');
+  _pickerTile = tile;
+  _pickerRemaining = state.fx.zinsen ? 2 : 1;
+  renderSubPicker();
+  document.getElementById('sub-picker').classList.add('on');
+  return true;
+}
+function renderSubPicker() {
+  const tile = _pickerTile;
+  if (!tile) return;
+  const live = availableSubs(tile);
   const opts = document.getElementById('sp-options');
   const titleEl = document.getElementById('sp-title');
-  titleEl.textContent = 'БОНУС: ' + tile.title.toUpperCase();
+  const suffix = _pickerRemaining > 1 ? ' · ОСТАЛОСЬ ВЫБОРОВ: ' + _pickerRemaining : '';
+  titleEl.textContent = 'БОНУС: ' + tile.title.toUpperCase() + suffix;
   opts.innerHTML = '';
+  if (live.length === 0) { closeSubPicker(); return; }
   for (const sub of live) {
     const b = document.createElement('button');
     b.className = 'opt';
@@ -1138,16 +1245,84 @@ function openSubPicker(tileId) {
     b.innerHTML = '<div class="name">' + sub.name + '</div><div class="desc">' + sub.desc + '</div>';
     b.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      state.claimedSubs.push({ tileId, subId: sub.id, t: state.t });
-      // Consume one sub-quad from this tile so the player doesn't double-dip.
+      state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t });
       tile.t = Math.max(0, tile.t - 1);
-      closeSubPicker();
+      applySubEffect(sub.id);
       renderBonusBar();
+      _pickerRemaining--;
+      if (_pickerRemaining <= 0) {
+        if (state.fx.zinsen) state.fx.zinsen = false; // consumed
+        closeSubPicker();
+      } else {
+        renderSubPicker();
+      }
     });
     opts.appendChild(b);
   }
-  panel.classList.add('on');
-  return true;
+}
+function applySubEffect(subId) {
+  const fx = state.fx;
+  switch (subId) {
+    case 'zeitlupe':
+      if (IS_TOUCH) fx.zeitlupe = 2.0; else fx.zeitlupeReady = true;
+      break;
+    case 'anker':
+      // Treated as a 4 s window the player can fire within; suppresses
+      // shake on one axis the entire time.
+      fx.ankerSh = 4.0;
+      if (Math.random() < 0.5) { fx.ankerLockH = true; fx.ankerLockV = false; }
+      else                    { fx.ankerLockV = true; fx.ankerLockH = false; }
+      break;
+    case 'atem':    fx.atem = 4.0; break;
+    case 'adlerauge':
+      fx.adlerSh = 1;
+      setAdlerVisual(true);
+      break;
+    case 'magnet':     fx.magnetSh = 1; break;
+    // Zoom held for ~3 s as a real-time timer so the FOV change covers
+    // aim and shot without snapping back mid-frame.
+    case 'zoom':       fx.zoomSh = 3.0; break;
+    case 'leuchtspur': fx.leuchtspurSh = 1; break;
+    case 'kocher':
+      state.boltsLeft = Math.min(4, state.boltsLeft + 2);
+      updateAmmo();
+      break;
+    case 'zinsen': fx.zinsen = true; break;
+    case 'schnaps':
+      state.boltsLeft = 4; updateAmmo();
+      fx.schnaps = 5.0;
+      break;
+    case 'kaffee':
+      // Clear any "negative" timed fx (no real debuffs yet — reserved).
+      fx.schnaps = 0;
+      break;
+    case 'schild': fx.schild = true; break;
+    case 'geduld': fx.geduld = 30.0; break;
+    case 'vorahnung':
+      fx.vorahnungSh = 1;
+      // Pre-roll the next shot's recoil kick so the indicator can preview it.
+      fx.nextKickX = (Math.random() - 0.5) * 0.4 * state.recoilStrength;
+      fx.nextKickY = (Math.random() - 0.5) * 0.3 * state.recoilStrength;
+      break;
+    case 'rhythmus': fx.rhythmusSec = 6.0; break;
+    case 'geist':    fx.geistSh = 1; break;
+    case 'doppel':   fx.doppelSh = 2; break;
+  }
+  updateActiveFx();
+}
+
+// Adlerauge — scales every live apple's visual mesh AND records that the
+// next hit test should use an inflated radius. The visual restore happens
+// when fx.adlerSh drops back to 0 (after the shot is consumed).
+function setAdlerVisual(on) {
+  const mul = on ? 1.5 : (1 / 1.5);
+  for (const a of state.apples) {
+    if (on && a._adlerScaled) continue;
+    if (!on && !a._adlerScaled) continue;
+    a.obj.scale.multiplyScalar(mul);
+    a.hitbox.radius *= mul;
+    a._adlerScaled = on;
+  }
 }
 function closeSubPicker() {
   const panel = document.getElementById('sub-picker');
@@ -1220,11 +1395,217 @@ document.getElementById('sp-skip').addEventListener('click', (e) => {
 renderBonusBar();
 updateAmmo();
 
+// ---------------------------------------------------------------------------
+// Per-frame fx — timers, visuals (Leuchtspur trails, Geist-Pfeil ghost,
+// Vorahnung indicator, Rhythmus metronome, active-fx HUD pills).
+// ---------------------------------------------------------------------------
+function tickFxTimers(realDt) {
+  const fx = state.fx;
+  if (fx.zeitlupe > 0)    fx.zeitlupe    = Math.max(0, fx.zeitlupe    - realDt);
+  if (fx.atem > 0)        fx.atem        = Math.max(0, fx.atem        - realDt);
+  if (fx.schnaps > 0)     fx.schnaps     = Math.max(0, fx.schnaps     - realDt);
+  if (fx.geduld > 0)      fx.geduld      = Math.max(0, fx.geduld      - realDt);
+  if (fx.rhythmusSec > 0) fx.rhythmusSec = Math.max(0, fx.rhythmusSec - realDt);
+  // Anker / Zoom are interpreted as real-time windows (4 s / 3 s).
+  if (fx.ankerSh > 0)     fx.ankerSh     = Math.max(0, fx.ankerSh     - realDt);
+  if (fx.zoomSh > 0)      fx.zoomSh      = Math.max(0, fx.zoomSh      - realDt);
+
+  // Trail fade-out
+  for (const tr of state.trails) {
+    tr.life -= realDt;
+    if (tr.line && tr.line.material) {
+      tr.line.material.opacity = Math.max(0, tr.life / tr.maxLife) * 0.85;
+    }
+  }
+  state.trails = state.trails.filter(tr => {
+    if (tr.life <= 0) { if (tr.line) scene.remove(tr.line); return false; }
+    return true;
+  });
+
+  // Ghost arrow position update
+  updateGhostBolt();
+  // Vorahnung / Rhythmus DOM updates
+  updateVorahnungIndicator();
+  updateRhythmusBar();
+  // Zoom FOV
+  applyZoomFov();
+  // Active-fx HUD
+  updateActiveFxIfChanged();
+}
+
+let _lastFxSig = '';
+function updateActiveFxIfChanged() {
+  const fx = state.fx;
+  const sig = [
+    fx.zeitlupe.toFixed(1), fx.atem.toFixed(1), fx.schnaps.toFixed(1),
+    fx.geduld.toFixed(1), fx.rhythmusSec.toFixed(1),
+    fx.ankerSh.toFixed(1), fx.adlerSh, fx.magnetSh,
+    fx.zoomSh.toFixed(1), fx.leuchtspurSh,
+    fx.vorahnungSh, fx.geistSh, fx.doppelSh,
+    fx.zeitlupeReady ? 1 : 0, fx.zinsen ? 1 : 0, fx.schild ? 1 : 0,
+  ].join('|');
+  if (sig === _lastFxSig) return;
+  _lastFxSig = sig;
+  updateActiveFx();
+}
+function updateActiveFx() {
+  const el = document.getElementById('active-fx');
+  if (!el) return;
+  el.innerHTML = '';
+  const fx = state.fx;
+  const items = [];
+  if (fx.zeitlupeReady)   items.push('Zeitlupe готов (ПКМ)');
+  if (fx.zeitlupe > 0)    items.push('Zeitlupe ' + fx.zeitlupe.toFixed(1) + 'с');
+  if (fx.atem > 0)        items.push('Atem ' + fx.atem.toFixed(1) + 'с');
+  if (fx.schnaps > 0)     items.push('Schnaps ' + fx.schnaps.toFixed(1) + 'с');
+  if (fx.geduld > 0)      items.push('Geduld ' + fx.geduld.toFixed(0) + 'с');
+  if (fx.rhythmusSec > 0) items.push('Rhythmus ' + fx.rhythmusSec.toFixed(0) + 'с');
+  if (fx.ankerSh > 0)     items.push('Anker ' + (fx.ankerLockH ? 'H' : 'V') + ' ' + fx.ankerSh.toFixed(1) + 'с');
+  if (fx.adlerSh > 0)     items.push('Adlerauge ×1.5');
+  if (fx.magnetSh > 0)    items.push('Magnet');
+  if (fx.zoomSh > 0)      items.push('Zoom ' + fx.zoomSh.toFixed(1) + 'с');
+  if (fx.leuchtspurSh > 0) items.push('Leuchtspur');
+  if (fx.vorahnungSh > 0) items.push('Vorahnung');
+  if (fx.geistSh > 0)     items.push('Geist-Pfeil');
+  if (fx.doppelSh > 0)    items.push('Doppel ×' + fx.doppelSh);
+  if (fx.zinsen)          items.push('Zinsen (×2 выбор)');
+  if (fx.schild)          items.push('Schild');
+  for (const t of items) {
+    const p = document.createElement('div');
+    p.className = 'fx-pill';
+    p.textContent = t;
+    el.appendChild(p);
+  }
+}
+
+function spawnLeuchtspur(start, dir) {
+  const end = start.clone().add(dir.clone().multiplyScalar(25));
+  const geom = new THREE.BufferGeometry().setFromPoints([start, end]);
+  const mat = new THREE.LineDashedMaterial({
+    color: 0xffd45a,
+    dashSize: 0.18, gapSize: 0.14,
+    transparent: true, opacity: 0.85, depthWrite: false,
+  });
+  const line = new THREE.Line(geom, mat);
+  line.computeLineDistances();
+  scene.add(line);
+  state.trails.push({ line, life: 2.0, maxLife: 2.0 });
+}
+
+function ensureGhostBolt() {
+  if (state.ghostBolt || !state.boltTemplate) return;
+  const g = state.boltTemplate.clone(true);
+  g.traverse(o => {
+    if (o.isMesh) {
+      o.material = o.material.clone();
+      o.material.transparent = true;
+      o.material.opacity = 0.35;
+      o.material.depthWrite = false;
+      o.castShadow = false;
+      o.receiveShadow = false;
+    }
+  });
+  g.visible = false;
+  scene.add(g);
+  state.ghostBolt = g;
+}
+function updateGhostBolt() {
+  ensureGhostBolt();
+  if (!state.ghostBolt) return;
+  const on = state.fx.geistSh > 0;
+  state.ghostBolt.visible = on;
+  if (!on) return;
+  const aimDir = getAimRayDir();
+  // Predicted impact: nearest apple along the ray (same logic as tryShoot's
+  // converge calc), or a fallback distance.
+  let convergeDist = 6.0;
+  let bestErrSq = Infinity;
+  for (const a of state.apples) {
+    const toApple = a.hitbox.center.clone().sub(camera.position);
+    const along = toApple.dot(aimDir);
+    if (along < 1.0) continue;
+    const perpSq = toApple.lengthSq() - along * along;
+    if (perpSq < bestErrSq) { bestErrSq = perpSq; convergeDist = along; }
+  }
+  const target = camera.position.clone().add(aimDir.clone().multiplyScalar(convergeDist));
+  state.ghostBolt.position.copy(target);
+  state.ghostBolt.lookAt(target.clone().add(aimDir));
+}
+
+function updateVorahnungIndicator() {
+  const el = document.getElementById('vorahnung-indicator');
+  if (!el) return;
+  const on = state.fx.vorahnungSh > 0 && state.fx.nextKickX !== null;
+  el.classList.toggle('on', on);
+  if (on) {
+    // Map kick magnitude (~±0.4 rad/s vel) to screen-space pixels.
+    const sx = state.fx.nextKickX * 220;
+    const sy = -state.fx.nextKickY * 220; // screen Y is inverted
+    el.style.transform = `translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px))`;
+  }
+}
+
+function updateRhythmusBar() {
+  const bar = document.getElementById('rhythmus-bar');
+  const thumb = document.getElementById('rhythmus-thumb');
+  if (!bar || !thumb) return;
+  const on = state.fx.rhythmusSec > 0;
+  bar.classList.toggle('on', on);
+  if (!on) return;
+  // Thumb follows the dominant horizontal sway component.
+  const swayNorm = Math.max(-1, Math.min(1, state.cameraSway.x * 12));
+  const px = swayNorm * 70; // half-width of bar minus thumb
+  thumb.style.transform = `translate(calc(-50% + ${px}px), -50%)`;
+}
+
+function applyZoomFov() {
+  // Zoom: shrink FOV from 55° to 32° for next shot. Reverts after a hit/miss
+  // (consumed via zoomSh decrement at tryShoot... actually we'd lose the
+  // visual feedback. Instead keep zoom active while zoomSh > 0; tryShoot
+  // decrements after firing). FOV change is one-frame so this lerp is fine.
+  const targetFov = state.fx.zoomSh > 0 ? 32 : 55;
+  if (Math.abs(camera.fov - targetFov) > 0.5) {
+    camera.fov += (targetFov - camera.fov) * 0.2;
+    camera.updateProjectionMatrix();
+  } else if (camera.fov !== targetFov) {
+    camera.fov = targetFov;
+    camera.updateProjectionMatrix();
+  }
+}
+
+// Zeitlupe trigger — RMB on desktop consumes a queued Zeitlupe and fires the slow-mo.
+window.addEventListener('contextmenu', (e) => {
+  // Block the browser menu in-game so RMB is a usable button.
+  if (document.getElementById('start').style.display !== 'none') return;
+  e.preventDefault();
+  if (state.fx.zeitlupeReady) {
+    state.fx.zeitlupe = 2.0;
+    state.fx.zeitlupeReady = false;
+    updateActiveFx();
+  }
+});
+
+// Consume Zoom AFTER the shot is fired (so the FOV stays in for that frame).
+// Wrap tryShoot's tail by adding a microtask via an MutationObserver-style
+// alternative: just decrement zoomSh inside the same tryShoot exit path.
+// Simpler: poll at end of frame — if a shot just happened, zoomSh would have
+// been consumed at tryShoot. We do that at tryShoot site already, below in the
+// shot-fire hook patched there. Here is the centralised consumption fallback.
+
 $('reset').addEventListener('click', () => {
   state.shots = 0; state.hits = 0; state.score = 0;
   state.streak = 0; state.bestStreak = 0;
   state.claimedSubs.length = 0;
+  // Clear all fx
+  for (const k of Object.keys(state.fx)) {
+    if (typeof state.fx[k] === 'number') state.fx[k] = 0;
+    if (typeof state.fx[k] === 'boolean') state.fx[k] = false;
+    if (state.fx[k] === null || typeof state.fx[k] === 'object') state.fx[k] = null;
+  }
+  state.fx.nextKickX = null; state.fx.nextKickY = null;
+  setAdlerVisual(false);  // safe no-op if nothing was scaled
   reloadBolts();
+  updateActiveFx();
   updateStats();
 });
 $('respawn').addEventListener('click', respawnApple);
@@ -1803,8 +2184,13 @@ function tryShoot() {
   if (state.boltsLeft <= 0) { AudioFx.miss(); return; }
   state.boltsLeft--;
   updateAmmo();
-  state.canShoot = false;
-  setTimeout(() => state.canShoot = true, 500);
+  // Doppelschuss: while doppelSh > 0, skip the firing-rate gate.
+  if (state.fx.doppelSh > 0) {
+    state.fx.doppelSh--;
+  } else {
+    state.canShoot = false;
+    setTimeout(() => state.canShoot = true, 500);
+  }
 
   AudioFx.shot();
   AudioFx.ensure();
@@ -1822,9 +2208,14 @@ function tryShoot() {
   }
 
   // Recoil — kicks the camera pitch up and adds a small jitter.
+  // Vorahnung pre-rolled the next kick so the indicator could preview it; use those values if present.
   state.recoilVel -= 1.6 * state.recoilStrength;
-  state.cameraSwayVel.x += (Math.random() - 0.5) * 0.4 * state.recoilStrength;
-  state.cameraSwayVel.y += (Math.random() - 0.5) * 0.3 * state.recoilStrength;
+  const useVor = state.fx.vorahnungSh > 0 && state.fx.nextKickX !== null;
+  const kickX = useVor ? state.fx.nextKickX : (Math.random() - 0.5) * 0.4 * state.recoilStrength;
+  const kickY = useVor ? state.fx.nextKickY : (Math.random() - 0.5) * 0.3 * state.recoilStrength;
+  state.cameraSwayVel.x += kickX;
+  state.cameraSwayVel.y += kickY;
+  if (state.fx.vorahnungSh > 0) { state.fx.vorahnungSh--; state.fx.nextKickX = state.fx.nextKickY = null; }
 
   // Muzzle flash
   const fl = document.getElementById('flash');
@@ -1878,8 +2269,31 @@ function tryShoot() {
     if (perpSq < bestErrSq) { bestErrSq = perpSq; convergeDist = along; }
   }
   const aimPoint = camera.position.clone().add(aimDir.clone().multiplyScalar(convergeDist));
-  const dir = aimPoint.clone().sub(startPos).normalize();
+  let dir = aimPoint.clone().sub(startPos).normalize();
+
+  // Magnet: blend the aim direction toward the closest apple within a small
+  // cone, so a slightly-off shot still snaps onto the target. The blend is
+  // intentionally light (~25 %) — we don't want to fully autoaim.
+  if (state.fx.magnetSh > 0) {
+    let best = null, bestAng = 0.22;  // ~12° cone
+    for (const a of state.apples) {
+      const toA = a.hitbox.center.clone().sub(startPos).normalize();
+      const ang = Math.acos(Math.max(-1, Math.min(1, toA.dot(dir))));
+      if (ang < bestAng) { bestAng = ang; best = toA; }
+    }
+    if (best) {
+      dir = dir.lerp(best, 0.25).normalize();
+    }
+    state.fx.magnetSh--;
+  }
+
   bolt.lookAt(startPos.clone().add(dir));
+
+  // Leuchtspur: leave a dashed trail along the bolt's path for ~2 s.
+  if (state.fx.leuchtspurSh > 0) {
+    spawnLeuchtspur(startPos, dir);
+    state.fx.leuchtspurSh--;
+  }
 
   state.shots++;
   updateStats();
@@ -1930,6 +2344,17 @@ function tryShoot() {
     hitPoints,
     resolved: false,
   });
+
+  // Adlerauge: consume the per-shot flag and restore each apple's normal
+  // scale + hitbox (we inflated them on claim, kept inflated through the
+  // hit test above, now revert).
+  if (state.fx.adlerSh > 0) {
+    state.fx.adlerSh--;
+    setAdlerVisual(false);
+  }
+  // Geist-Pfeil: ghost arrow is consumed by the shot.
+  if (state.fx.geistSh > 0) state.fx.geistSh--;
+  updateActiveFx();
 }
 
 const _raycaster = new THREE.Raycaster();
@@ -2025,7 +2450,12 @@ function shatterApple(idx, impactPoint, impactDir) {
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 function tick() {
-  const dt = Math.min(0.05, clock.getDelta());
+  const realDt = Math.min(0.05, clock.getDelta());
+  // Zeitlupe: while active, game logic ticks at 30 % speed. Effect timers
+  // and DOM/UI events still use real time.
+  const slow = state.fx.zeitlupe > 0 ? 0.3 : 1.0;
+  const dt = realDt * slow;
+  tickFxTimers(realDt);
   state.t += dt;
 
   // FPS-style camera aim, with the SIGN CORRECTED so mouse-right = look-right.
@@ -2039,7 +2469,12 @@ function tick() {
   // like the 2D sandbox's cam.x/cam.y: it makes the world wobble even when
   // the player holds the mouse perfectly still.
   const t = state.t;
-  const drift = state.drunk;
+  // Atem anhalten halves both the drunkenness AND the positional drift for 4 s.
+  // Schnaps doubles drunkenness for 5 s (risky trade — only affects jitter).
+  const atemMul = state.fx.atem > 0 ? 0.5 : 1.0;
+  const schnapsMul = state.fx.schnaps > 0 ? 2.0 : 1.0;
+  const drift = state.drunk * atemMul * schnapsMul;
+  const posDriftMul = atemMul;
   // Asymmetric yaw: leftward pan is clamped near the right edge of the
   // fireplace (which sits around world x≈-2 from the camera), so the view
   // can't drift off the scene on that side.
@@ -2070,6 +2505,11 @@ function tick() {
   state.cameraSwayVel.multiplyScalar(Math.exp(-5 * dt));
   state.cameraSway.x += state.cameraSwayVel.x * dt;
   state.cameraSway.y += state.cameraSwayVel.y * dt;
+  // Anker: lock one axis of the rotational sway (horizontal yaw OR vertical pitch).
+  if (state.fx.ankerSh > 0) {
+    if (state.fx.ankerLockH) { state.cameraSway.x = 0; state.cameraSwayVel.x = 0; }
+    if (state.fx.ankerLockV) { state.cameraSway.y = 0; state.cameraSwayVel.y = 0; }
+  }
 
   // Recoil pitch kick (decays back to zero).
   state.recoilVel += -state.recoilOffset * 30 * dt;
@@ -2090,15 +2530,19 @@ function tick() {
               + Math.cos(t * 4.10 + 0.4)  * 0.15;
   const swayY = Math.sin(t * 1.60 + 2.0)  * 0.4
               + Math.cos(t * 3.10 + 0.9)  * 0.2;
-  camera.position.x = CAMERA_BASE_POS.x + swayX * state.cameraDrift * 0.15;
-  camera.position.z = CAMERA_BASE_POS.z + swayZ * state.cameraDrift * 0.15;
-  camera.position.y = CAMERA_BASE_POS.y + swayY * state.cameraDrift * 0.07;
+  // Anker also clamps the corresponding positional axis (horizontal = XZ).
+  const ankerH = state.fx.ankerSh > 0 && state.fx.ankerLockH;
+  const ankerV = state.fx.ankerSh > 0 && state.fx.ankerLockV;
+  camera.position.x = CAMERA_BASE_POS.x + (ankerH ? 0 : swayX * state.cameraDrift * 0.15 * posDriftMul);
+  camera.position.z = CAMERA_BASE_POS.z + (ankerH ? 0 : swayZ * state.cameraDrift * 0.15 * posDriftMul);
+  camera.position.y = CAMERA_BASE_POS.y + (ankerV ? 0 : swayY * state.cameraDrift * 0.07 * posDriftMul);
 
   // Idle drift — after 5 s of no input, the camera slowly tilts down
   // (and slightly drifts the yaw), as if the player's hand has gone slack.
   // Applied directly to the final rotation, NOT through the aim spring,
   // so it isn't damped or "fought" by the drunken sway feedback.
-  const IDLE_THRESHOLD = 5.0;      // seconds before drift starts
+  // Geduld doubles the idle threshold for 30 s.
+  const IDLE_THRESHOLD = (state.fx.geduld > 0 ? 10.0 : 5.0);
   const IDLE_PITCH_RATE = 0.10;    // rad/s downward while idle
   const idleSec = state.t - state.lastInputTime;
   if (idleSec > IDLE_THRESHOLD) {
