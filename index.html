@@ -1332,9 +1332,9 @@ function tick() {
   // Asymmetric yaw: leftward pan is clamped near the right edge of the
   // fireplace (which sits around world x≈-2 from the camera), so the view
   // can't drift off the scene on that side.
-  const AIM_YAW_LEFT  = 0.22;   // max additional yaw when looking left
-  const AIM_YAW_RIGHT = 0.55;   // max additional yaw when looking right
-  const AIM_PITCH = 0.40;   // ~23° max pitch
+  const AIM_YAW_LEFT  = 0.45;   // max additional yaw when looking left
+  const AIM_YAW_RIGHT = 0.85;   // max additional yaw when looking right
+  const AIM_PITCH = 0.55;   // max pitch
   const camAimX = state.aim.x >= 0
     ? -state.aim.x * AIM_YAW_RIGHT   // mouse right → yaw < 0 → look right ✓
     : -state.aim.x * AIM_YAW_LEFT;   // mouse left  → yaw > 0 → look left, clamped
