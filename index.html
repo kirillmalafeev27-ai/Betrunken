@@ -661,21 +661,73 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Vorahnung — small arrow on screen showing the pre-rolled next kick */
+  /* Vorahnung — container for the upcoming-push preview dots. The recoil
+     marker plus the queued hiccup markers each get an absolute-positioned
+     dot inside this 0×0 anchor at screen centre. */
   #vorahnung-indicator {
     position: absolute;
     top: 50%; left: 50%;
-    width: 6px; height: 6px;
-    background: #ffd45a;
-    border-radius: 50%;
-    box-shadow: 0 0 12px #ffd45a, 0 0 24px #ff8a3c;
-    transform: translate(-50%, -50%);
+    width: 0; height: 0;
     pointer-events: none;
-    opacity: 0;
     z-index: 4;
+  }
+  #vorahnung-indicator .v-dot {
+    position: absolute;
+    top: 0; left: 0;
+    width: 6px; height: 6px;
+    margin-left: -3px; margin-top: -3px;
+    border-radius: 50%;
+    background: #ffd45a;
+    box-shadow: 0 0 8px #ffd45a, 0 0 16px #ff8a3c;
+  }
+  #vorahnung-indicator .v-dot.recoil {
+    width: 8px; height: 8px; margin-left: -4px; margin-top: -4px;
+    background: #ff8a3c;
+    box-shadow: 0 0 10px #ff8a3c, 0 0 20px #ffd45a;
+  }
+
+  /* Geist — bright crisp dot at the screen centre while active. */
+  #geist-dot {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 5px; height: 5px;
+    margin-left: -2.5px; margin-top: -2.5px;
+    border-radius: 50%;
+    background: #ffd45a;
+    box-shadow: 0 0 6px #ffd45a, 0 0 14px #ff8a3c, 0 0 22px rgba(255,140,40,0.6);
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
     transition: opacity 0.18s;
   }
-  #vorahnung-indicator.on { opacity: 1; }
+  #geist-dot.on { opacity: 1; }
+
+  /* Zinsen prompt — appears in the centre after the first Zinsen pick so
+     the player knows to click a second tile. */
+  #zinsen-prompt {
+    position: absolute;
+    top: 36%; left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 10px 20px;
+    background: rgba(20,18,16,0.92);
+    border: 1px solid rgba(143,217,154,0.7);
+    border-radius: 10px;
+    color: #8fd99a;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+    pointer-events: none;
+    z-index: 6;
+    opacity: 0;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+    box-shadow: 0 0 18px 1px rgba(143,217,154,0.5);
+  }
+  #zinsen-prompt.on { opacity: 1; }
+  body.zinsen { cursor: auto; }
+  body.zinsen #app { cursor: auto; }
+  body.zinsen canvas { cursor: auto; }
 
   /* Rhythmus metronome bar — a thin horizontal track with a moving thumb */
   #rhythmus-bar {
@@ -880,6 +932,10 @@
   <div id="active-fx"></div>
 
   <div id="vorahnung-indicator"></div>
+
+  <div id="geist-dot"></div>
+
+  <div id="zinsen-prompt">Выбери ещё один бонус — Zinsen</div>
 
   <div id="rhythmus-bar"><div id="rhythmus-thumb"></div></div>
 
@@ -1280,13 +1336,15 @@ const state = {
     schnaps: 0,
     geduld: 0,
     rhythmusSec: 0,
+    adlerSec: 0,           // wave-bonus apple-zoom window
     // per-shot counters (1 = arm for next shot)
     ankerSh: 0, ankerLockH: false, ankerLockV: false,
-    adlerSh: 0,
     magnetSh: 0,
     zoomSh: 0,
     leuchtspurSh: 0,
     vorahnungSh: 0,
+    vorahnungQueue: [],    // pre-rolled upcoming hiccups for the preview
+    zinsenPending: false,  // first Zinsen pick done — awaiting second tile click
     geistSh: 0,
     doppelSh: 0,
     // queued / latched
@@ -1413,7 +1471,7 @@ const BONUS_CATEGORIES = [
       { id: 'leuchtspur', pos: 4, name: 'Leuchtspur', desc: 'видна траектория болта пунктиром' },
       { id: 'zoom',       pos: 3, name: 'Zoom',       desc: 'приближение, точность выше' },
       { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'болт чуть-чуть магнитится к цели' },
-      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'яблоко ×1.5 на следующий выстрел' },
+      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'все яблоки ×1.5 на 3 секунды' },
   ]},
   { id: 'res', title: 'Ресурсы', subs: [
       { id: 'schnaps', pos: 3, name: 'Schnaps', desc: '+болты, шатание ×N на 5 сек' },
@@ -1427,9 +1485,9 @@ const BONUS_CATEGORIES = [
   ]},
   { id: 'info', title: 'Чтение', subs: [
       { id: 'rhythmus',  pos: 4, name: 'Rhythmus',    desc: 'метроном, синхронный с шатанием' },
-      { id: 'geist',     pos: 3, name: 'Geist-Pfeil', desc: 'призрачный болт-телеграф' },
-      { id: 'doppel',    pos: 2, name: 'Doppelschuss',desc: 'два болта подряд без перезарядки' },
-      { id: 'vorahnung', pos: 1, name: 'Vorahnung',   desc: 'на 1 выстрел видно толчок камеры' },
+      { id: 'geist',     pos: 3, name: 'Точка',        desc: 'яркая точка в центре экрана для точного прицела' },
+      { id: 'doppel',    pos: 2, name: 'Doppelschuss', desc: 'один выстрел = два болта с разлётом, больше шанс попасть' },
+      { id: 'vorahnung', pos: 1, name: 'Vorahnung',    desc: 'видны все предстоящие толчки камеры вплоть до выстрела' },
   ]},
 ];
 
@@ -1504,6 +1562,14 @@ function renderBonusBar() {
 
     el.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
+      // Zinsen second-pick mode: clicking ANY tile immediately opens its
+      // picker instead of toggling the armed selection.
+      if (state.fx.zinsenPending) {
+        finishZinsenPending();
+        openSubPicker(tile.id);
+        markInput();
+        return;
+      }
       state.selectedTileId = (state.selectedTileId === tile.id) ? null : tile.id;
       renderBonusBar();
       markInput();
@@ -1608,7 +1674,7 @@ function openSubPicker(tileId) {
   const tile = state.bonusTiles.find(t => t.id === tileId);
   if (!tile) return false;
   _pickerTile = tile;
-  _pickerRemaining = state.fx.zinsen ? 2 : 1;
+  _pickerRemaining = 1;
   renderSubPicker();
   document.getElementById('sub-picker').classList.add('on');
   return true;
@@ -1658,8 +1724,13 @@ function renderSubPicker() {
         renderBonusBar();
         _pickerRemaining--;
         if (_pickerRemaining <= 0) {
-          if (state.fx.zinsen) state.fx.zinsen = false;
+          // Zinsen: after the first paid pick, set up the "choose a second
+          // tile" mode — close this picker, show the centre prompt, expose
+          // the system cursor so the player can click another category.
+          const zinsenWasOn = state.fx.zinsen;
+          state.fx.zinsen = false;
           closeSubPicker();
+          if (zinsenWasOn) startZinsenPending();
         } else {
           renderSubPicker();
         }
@@ -1689,8 +1760,11 @@ function applySubEffect(subId) {
       break;
     case 'atem':    fx.atem = 4.0; break;
     case 'adlerauge':
-      fx.adlerSh = 1;
-      setAdlerVisual(true);
+      // All apples get ×1.5 for 3 seconds. Visual scale + hitbox bump are
+      // applied immediately and reverted when the timer expires in
+      // tickFxTimers.
+      if (fx.adlerSec <= 0) setAdlerVisual(true);
+      fx.adlerSec = 3.0;
       break;
     case 'magnet':     fx.magnetSh = 1; break;
     // Zoom held for ~3 s as a real-time timer so the FOV change covers
@@ -1730,14 +1804,20 @@ function applySubEffect(subId) {
       fx.geduld = 999;
       break;
     case 'vorahnung':
+      // Reveal EVERY upcoming push until the next shot: pre-roll the recoil
+      // kick AND a queue of upcoming hiccups. Both are drawn as dots on
+      // screen by updateVorahnungIndicator.
       fx.vorahnungSh = 1;
-      // Pre-roll the next shot's recoil kick so the indicator can preview it.
       fx.nextKickX = (Math.random() - 0.5) * 0.4 * state.recoilStrength;
       fx.nextKickY = (Math.random() - 0.5) * 0.3 * state.recoilStrength;
+      rollVorahnungQueue();
       break;
     case 'rhythmus': fx.rhythmusSec = 6.0; break;
     case 'geist':    fx.geistSh = 1; break;
-    case 'doppel':   fx.doppelSh = 2; break;
+    case 'doppel':
+      // Single trigger that fires a SPREAD shot (two bolts at once).
+      fx.doppelSh = 1;
+      break;
   }
   updateActiveFx();
 }
@@ -1758,6 +1838,21 @@ function setAdlerVisual(on) {
 function closeSubPicker() {
   const panel = document.getElementById('sub-picker');
   if (panel) panel.classList.remove('on');
+}
+
+// Zinsen pending — after the first paid pick, prompt the player to choose
+// a second tile and expose the system cursor so they can click it.
+function startZinsenPending() {
+  state.fx.zinsenPending = true;
+  document.body.classList.add('zinsen');
+  const p = document.getElementById('zinsen-prompt');
+  if (p) p.classList.add('on');
+}
+function finishZinsenPending() {
+  state.fx.zinsenPending = false;
+  document.body.classList.remove('zinsen');
+  const p = document.getElementById('zinsen-prompt');
+  if (p) p.classList.remove('on');
 }
 
 // Ammo display
@@ -1821,6 +1916,8 @@ document.getElementById('reload-btn').addEventListener('click', (e) => {
 document.getElementById('sp-skip').addEventListener('click', (e) => {
   e.preventDefault(); e.stopPropagation();
   closeSubPicker();
+  // If the player skips while in the Zinsen second-pick mode, abandon it.
+  if (state.fx.zinsenPending) finishZinsenPending();
 });
 
 renderBonusBar();
@@ -1840,6 +1937,12 @@ function tickFxTimers(realDt) {
   // Anker / Zoom are interpreted as real-time windows (4 s / 3 s).
   if (fx.ankerSh > 0)     fx.ankerSh     = Math.max(0, fx.ankerSh     - realDt);
   if (fx.zoomSh > 0)      fx.zoomSh      = Math.max(0, fx.zoomSh      - realDt);
+  // Adlerauge — auto-revert the apple zoom when the 3 s window expires.
+  if (fx.adlerSec > 0) {
+    const prev = fx.adlerSec;
+    fx.adlerSec = Math.max(0, fx.adlerSec - realDt);
+    if (prev > 0 && fx.adlerSec <= 0) setAdlerVisual(false);
+  }
 
   // Trail fade-out
   for (const tr of state.trails) {
@@ -1870,10 +1973,10 @@ function updateActiveFxIfChanged() {
   const sig = [
     fx.zeitlupe.toFixed(1), fx.atem.toFixed(1), fx.schnaps.toFixed(1),
     fx.geduld > 0 ? 1 : 0, fx.rhythmusSec.toFixed(1),
-    fx.ankerSh.toFixed(1), fx.adlerSh, fx.magnetSh,
+    fx.ankerSh.toFixed(1), fx.adlerSec.toFixed(1), fx.magnetSh,
     fx.zoomSh.toFixed(1), fx.leuchtspurSh,
-    fx.vorahnungSh, fx.geistSh, fx.doppelSh,
-    fx.zeitlupeReady ? 1 : 0, fx.zinsen ? 1 : 0, fx.schild,
+    fx.vorahnungSh, (fx.vorahnungQueue || []).length, fx.geistSh, fx.doppelSh,
+    fx.zeitlupeReady ? 1 : 0, fx.zinsen ? 1 : 0, fx.zinsenPending ? 1 : 0, fx.schild,
   ].join('|');
   if (sig === _lastFxSig) return;
   _lastFxSig = sig;
@@ -1892,14 +1995,15 @@ function updateActiveFx() {
   if (fx.geduld > 0)      items.push('Geduld (волна)');
   if (fx.rhythmusSec > 0) items.push('Rhythmus ' + fx.rhythmusSec.toFixed(0) + 'с');
   if (fx.ankerSh > 0)     items.push('Anker ' + (fx.ankerLockH ? 'H' : 'V') + ' ' + fx.ankerSh.toFixed(1) + 'с');
-  if (fx.adlerSh > 0)     items.push('Adlerauge ×1.5');
+  if (fx.adlerSec > 0)    items.push('Adlerauge ×1.5 ' + fx.adlerSec.toFixed(1) + 'с');
   if (fx.magnetSh > 0)    items.push('Magnet');
   if (fx.zoomSh > 0)      items.push('Zoom ' + fx.zoomSh.toFixed(1) + 'с');
   if (fx.leuchtspurSh > 0) items.push('Leuchtspur');
   if (fx.vorahnungSh > 0) items.push('Vorahnung');
   if (fx.geistSh > 0)     items.push('Geist-Pfeil');
-  if (fx.doppelSh > 0)    items.push('Doppel ×' + fx.doppelSh);
-  if (fx.zinsen)          items.push('Zinsen (×2 выбор)');
+  if (fx.doppelSh > 0)    items.push('Doppelschuss (2 болта)');
+  if (fx.zinsen)          items.push('Zinsen (доп. выбор)');
+  if (fx.zinsenPending)   items.push('Zinsen — выбери ещё бонус');
   if (fx.schild > 0)      items.push('Schild ×' + fx.schild);
   for (const t of items) {
     const p = document.createElement('div');
@@ -1923,56 +2027,69 @@ function spawnLeuchtspur(start, dir) {
   state.trails.push({ line, life: 2.0, maxLife: 2.0 });
 }
 
-function ensureGhostBolt() {
-  if (state.ghostBolt || !state.boltTemplate) return;
-  const g = state.boltTemplate.clone(true);
-  g.traverse(o => {
-    if (o.isMesh) {
-      o.material = o.material.clone();
-      o.material.transparent = true;
-      o.material.opacity = 0.35;
-      o.material.depthWrite = false;
-      o.castShadow = false;
-      o.receiveShadow = false;
-    }
-  });
-  g.visible = false;
-  scene.add(g);
-  state.ghostBolt = g;
-}
+// Geist (точка) — just toggle a bright CSS dot at screen centre.
 function updateGhostBolt() {
-  ensureGhostBolt();
-  if (!state.ghostBolt) return;
-  const on = state.fx.geistSh > 0;
-  state.ghostBolt.visible = on;
-  if (!on) return;
-  const aimDir = getAimRayDir();
-  // Predicted impact: nearest apple along the ray (same logic as tryShoot's
-  // converge calc), or a fallback distance.
-  let convergeDist = 6.0;
-  let bestErrSq = Infinity;
-  for (const a of state.apples) {
-    const toApple = a.hitbox.center.clone().sub(camera.position);
-    const along = toApple.dot(aimDir);
-    if (along < 1.0) continue;
-    const perpSq = toApple.lengthSq() - along * along;
-    if (perpSq < bestErrSq) { bestErrSq = perpSq; convergeDist = along; }
+  const el = document.getElementById('geist-dot');
+  if (!el) return;
+  el.classList.toggle('on', state.fx.geistSh > 0);
+}
+
+// Pre-roll a queue of upcoming hiccups for Vorahnung. Each entry stores
+// the impulse direction AND the cumulative camera offset it'll cause —
+// the latter is what we plot on screen as a dot.
+const VORAHNUNG_QUEUE_SIZE = 3;
+const HICCUP_DAMP_RATE = 5.5;   // matches tickHiccup's damping rate
+const HICCUP_MAG = 3.2;          // matches tickHiccup's impulse magnitude
+function rollVorahnungEntry(accumX, accumY) {
+  const dirX = (Math.random() - 0.5);
+  const dirY = (Math.random() * 0.7) - 0.35;
+  // Net offset from one damped impulse ≈ velImpulse / dampingRate.
+  const offX = (HICCUP_MAG * dirX) / HICCUP_DAMP_RATE;
+  const offY = (HICCUP_MAG * dirY) / HICCUP_DAMP_RATE;
+  return {
+    dirX, dirY,
+    accumX: Math.max(-1.1, Math.min(1.1, accumX + offX)),
+    accumY: Math.max(-0.8, Math.min(0.8, accumY + offY)),
+  };
+}
+function rollVorahnungQueue() {
+  state.fx.vorahnungQueue = [];
+  let accumX = state.wave.hiccupX;
+  let accumY = state.wave.hiccupY;
+  for (let i = 0; i < VORAHNUNG_QUEUE_SIZE; i++) {
+    const e = rollVorahnungEntry(accumX, accumY);
+    accumX = e.accumX;
+    accumY = e.accumY;
+    state.fx.vorahnungQueue.push(e);
   }
-  const target = camera.position.clone().add(aimDir.clone().multiplyScalar(convergeDist));
-  state.ghostBolt.position.copy(target);
-  state.ghostBolt.lookAt(target.clone().add(aimDir));
 }
 
 function updateVorahnungIndicator() {
   const el = document.getElementById('vorahnung-indicator');
   if (!el) return;
-  const on = state.fx.vorahnungSh > 0 && state.fx.nextKickX !== null;
-  el.classList.toggle('on', on);
-  if (on) {
-    // Map kick magnitude (~±0.4 rad/s vel) to screen-space pixels.
+  const on = state.fx.vorahnungSh > 0;
+  el.innerHTML = '';
+  if (!on) return;
+  // Recoil dot — the kick the next shot will apply.
+  if (state.fx.nextKickX !== null) {
+    const d = document.createElement('div');
+    d.className = 'v-dot recoil';
     const sx = state.fx.nextKickX * 220;
-    const sy = -state.fx.nextKickY * 220; // screen Y is inverted
-    el.style.transform = `translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px))`;
+    const sy = -state.fx.nextKickY * 220;
+    d.style.transform = `translate(${sx}px, ${sy}px)`;
+    el.appendChild(d);
+  }
+  // Queued hiccup dots — first one brightest, later ones fade.
+  const q = state.fx.vorahnungQueue || [];
+  for (let i = 0; i < q.length; i++) {
+    const e = q[i];
+    const d = document.createElement('div');
+    d.className = 'v-dot';
+    const sx = e.accumX * 220;
+    const sy = -e.accumY * 220;
+    d.style.transform = `translate(${sx}px, ${sy}px)`;
+    d.style.opacity = String(1.0 - i * 0.28);
+    el.appendChild(d);
   }
 }
 
@@ -2034,6 +2151,8 @@ $('reset').addEventListener('click', () => {
     if (state.fx[k] === null || typeof state.fx[k] === 'object') state.fx[k] = null;
   }
   state.fx.nextKickX = null; state.fx.nextKickY = null;
+  state.fx.vorahnungQueue = [];
+  finishZinsenPending();
   setAdlerVisual(false);  // safe no-op if nothing was scaled
   reloadBolts();
   updateActiveFx();
@@ -2505,6 +2624,8 @@ function spawnApple() {
   }
   // Reset wave-3 doubling so it can re-trigger this wave.
   state.wave.doublesActive = false;
+  // If Adlerauge is still active, inflate the freshly-spawned apples too.
+  if (state.fx.adlerSec > 0) setAdlerVisual(true);
 }
 
 function respawnApple() {
@@ -2704,19 +2825,6 @@ function tryShoot() {
   fl.classList.add('on');
   setTimeout(() => fl.classList.remove('on'), 70);
 
-  // Spawn bolt with the camera's current forward direction.
-  const bolt = state.boltTemplate.clone(true);
-  bolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
-  // Add a translucent streak behind the bolt so the flight is visually obvious.
-  const streak = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.004, 0.0005, 1.1, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.55, depthWrite: false })
-  );
-  streak.rotation.x = -Math.PI / 2;   // align cylinder along local Z
-  streak.position.z = 0.55;           // sits behind the bolt (bolt forward = -Z)
-  bolt.add(streak);
-  scene.add(bolt);
-
   // Start position: world-space center of the idle bolt sitting on the
   // crossbow rail, so the projectile visually emerges from the middle of
   // the weapon. Fallback to a hand-tuned offset if no idle bolt exists.
@@ -2728,19 +2836,9 @@ function tryShoot() {
     const muzzleLocal = new THREE.Vector3(0.02, -0.08, -0.85);
     startPos = muzzleLocal.clone().applyMatrix4(camera.matrixWorld);
   }
-  bolt.position.copy(startPos);
 
-  // Direction: from the MUZZLE to the point the reticle is on, NOT simply
-  // the camera's forward vector. Because the muzzle sits below/left of the
-  // camera, firing parallel to the line of sight causes parallax — the
-  // bolt arrives below the crosshair at any finite range. Converge the
-  // trajectory at the actual target distance (closest point on the camera
-  // ray to the apple, or a sensible default if there's no apple) so the
-  // bolt passes exactly through the reticle at the target.
+  // Direction: from the MUZZLE through the reticle's converge point.
   const aimDir = getAimRayDir();
-  // Converge the trajectory at whichever live apple is closest to the camera
-  // ray — that one is presumably what the player is aiming at. Falls back to
-  // a sane default distance when there are no apples.
   let convergeDist = 5.0;
   let bestErrSq = Infinity;
   for (const a of state.apples) {
@@ -2752,92 +2850,111 @@ function tryShoot() {
     if (perpSq < bestErrSq) { bestErrSq = perpSq; convergeDist = along; }
   }
   const aimPoint = camera.position.clone().add(aimDir.clone().multiplyScalar(convergeDist));
-  let dir = aimPoint.clone().sub(startPos).normalize();
+  let primaryDir = aimPoint.clone().sub(startPos).normalize();
 
-  // Magnet: blend the aim direction toward the closest apple within a small
-  // cone, so a slightly-off shot still snaps onto the target. The blend is
-  // intentionally light (~25 %) — we don't want to fully autoaim.
+  // Magnet: blend the aim direction toward the closest apple within a small cone.
   if (state.fx.magnetSh > 0) {
     let best = null, bestAng = 0.22;  // ~12° cone
     for (const a of state.apples) {
       if (a.isGhost) continue;
       const toA = a.hitbox.center.clone().sub(startPos).normalize();
-      const ang = Math.acos(Math.max(-1, Math.min(1, toA.dot(dir))));
+      const ang = Math.acos(Math.max(-1, Math.min(1, toA.dot(primaryDir))));
       if (ang < bestAng) { bestAng = ang; best = toA; }
     }
     if (best) {
-      dir = dir.lerp(best, 0.25).normalize();
+      primaryDir = primaryDir.lerp(best, 0.25).normalize();
     }
     state.fx.magnetSh--;
   }
 
-  bolt.lookAt(startPos.clone().add(dir));
-
-  // Leuchtspur: leave a dashed trail along the bolt's path for ~2 s.
-  if (state.fx.leuchtspurSh > 0) {
-    spawnLeuchtspur(startPos, dir);
-    state.fx.leuchtspurSh--;
+  // Doppelschuss: ONE click → TWO bolts with a small horizontal spread, so
+  // the combined hit area covers the apple a bit wider. We rotate the dir
+  // a couple of degrees around world-up to either side.
+  const dirs = [primaryDir];
+  if (state.fx.doppelSh > 0) {
+    state.fx.doppelSh--;
+    const up = new THREE.Vector3(0, 1, 0);
+    const spread = 0.04;  // ~2.3°
+    const left  = primaryDir.clone().applyAxisAngle(up,  spread).normalize();
+    const right = primaryDir.clone().applyAxisAngle(up, -spread).normalize();
+    dirs.length = 0;
+    dirs.push(left, right);
   }
+
+  // Spawn each bolt, run the hit test, push it into the in-flight list.
+  const leuchtspurOn = state.fx.leuchtspurSh > 0;
+  for (const dir of dirs) {
+    const bolt = state.boltTemplate.clone(true);
+    bolt.traverse(o => { if (o.isMesh) o.material = o.material.clone(); });
+    const streak = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.004, 0.0005, 1.1, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.55, depthWrite: false })
+    );
+    streak.rotation.x = -Math.PI / 2;
+    streak.position.z = 0.55;
+    bolt.add(streak);
+    scene.add(bolt);
+    bolt.position.copy(startPos);
+    bolt.lookAt(startPos.clone().add(dir));
+
+    if (leuchtspurOn) spawnLeuchtspur(startPos, dir);
+
+    // Hit test for this bolt's specific dir.
+    let willHit = false;
+    let hitPoint = null;
+    let hitAppleIdx = -1;
+    let hitZone = null;
+    let hitPoints = 0;
+    let bestT = Infinity;
+    for (let i = 0; i < state.apples.length; i++) {
+      if (state.apples[i].isGhost) continue;
+      const hb = state.apples[i].hitbox;
+      const oc = startPos.clone().sub(hb.center);
+      const b = oc.dot(dir);
+      const c = oc.dot(oc) - hb.radius * hb.radius;
+      const disc = b * b - c;
+      if (disc < 0) continue;
+      const t = -b - Math.sqrt(disc);
+      if (t > 0 && t < bestT) {
+        bestT = t;
+        hitAppleIdx = i;
+        hitPoint = startPos.clone().add(dir.clone().multiplyScalar(t));
+        willHit = true;
+        const perpDist = Math.sqrt(Math.max(0, oc.dot(oc) - b * b));
+        const r = perpDist / hb.radius;
+        if (r < 0.33)      { hitZone = 'center'; hitPoints = 10; }
+        else if (r < 0.66) { hitZone = 'mid';    hitPoints = 5;  }
+        else               { hitZone = 'outer';  hitPoints = 2;  }
+      }
+    }
+
+    state.bolts.push({
+      obj: bolt,
+      pos: startPos.clone(),
+      dir: dir.clone(),
+      speed: 13,
+      life: 3.0,
+      willHit,
+      hitPoint,
+      hitAppleIdx,
+      hitZone,
+      hitPoints,
+      resolved: false,
+    });
+  }
+  if (leuchtspurOn) state.fx.leuchtspurSh--;
 
   state.shots++;
   updateStats();
 
-  // Hit test: ray vs every live apple sphere. Pick the nearest hit so the
-  // bolt resolves on the closest apple along its path.
-  // Also record HOW close to the apple's center the bolt passes — this drives
-  // the hidden darts-style scoring (10 / 5 / 2 from inner ring outward).
-  let willHit = false;
-  let hitPoint = null;
-  let hitAppleIdx = -1;
-  let hitZone = null;
-  let hitPoints = 0;
-  let bestT = Infinity;
-  for (let i = 0; i < state.apples.length; i++) {
-    if (state.apples[i].isGhost) continue;   // phantom twins: bolt phases through
-    const hb = state.apples[i].hitbox;
-    const oc = startPos.clone().sub(hb.center);
-    const b = oc.dot(dir);
-    const c = oc.dot(oc) - hb.radius * hb.radius;
-    const disc = b * b - c;
-    if (disc < 0) continue;
-    const t = -b - Math.sqrt(disc);
-    if (t > 0 && t < bestT) {
-      bestT = t;
-      hitAppleIdx = i;
-      hitPoint = startPos.clone().add(dir.clone().multiplyScalar(t));
-      willHit = true;
-      // Off-center distance: perpendicular distance from the ray to the
-      // sphere center, normalized by the sphere radius (0 = bullseye, 1 = grazing edge).
-      const perpDist = Math.sqrt(Math.max(0, oc.dot(oc) - b * b));
-      const r = perpDist / hb.radius;
-      if (r < 0.33)      { hitZone = 'center'; hitPoints = 10; }
-      else if (r < 0.66) { hitZone = 'mid';    hitPoints = 5;  }
-      else               { hitZone = 'outer';  hitPoints = 2;  }
-    }
+  // Vorahnung: the shot consumed all upcoming previews — clear them.
+  if (state.fx.vorahnungSh > 0) {
+    state.fx.vorahnungSh--;
+    state.fx.vorahnungQueue = [];
+    state.fx.nextKickX = null;
+    state.fx.nextKickY = null;
   }
-
-  state.bolts.push({
-    obj: bolt,
-    pos: startPos.clone(),
-    dir: dir.clone(),
-    speed: 13,
-    life: 3.0,
-    willHit,
-    hitPoint,
-    hitAppleIdx,
-    hitZone,
-    hitPoints,
-    resolved: false,
-  });
-
-  // Adlerauge: consume the per-shot flag and restore each apple's normal
-  // scale + hitbox (we inflated them on claim, kept inflated through the
-  // hit test above, now revert).
-  if (state.fx.adlerSh > 0) {
-    state.fx.adlerSh--;
-    setAdlerVisual(false);
-  }
-  // Geist-Pfeil: ghost arrow is consumed by the shot.
+  // Geist consumed by the shot.
   if (state.fx.geistSh > 0) state.fx.geistSh--;
   updateActiveFx();
 }
@@ -3067,14 +3184,20 @@ function tickHiccup(realDt, idleSec) {
     if (state.fx.schild > 0) {
       state.fx.schild--;  // Schild eats up to two ticks per wave
     } else {
-      // Direction is random; magnitude is consistent so it always reads as
-      // a "hiccup". The pitch component is biased slightly downward so the
-      // hiccup feels like a real lurch.
-      const dirX = (Math.random() - 0.5);
-      const dirY = (Math.random() * 0.7) - 0.35;
-      const mag = 3.2;
-      w.hiccupVelX += dirX * mag;
-      w.hiccupVelY += dirY * mag;
+      // Pull the next impulse from Vorahnung's pre-rolled queue when active,
+      // so the previewed dots match the actual hiccups the player will feel.
+      let dirX, dirY;
+      const q = state.fx.vorahnungQueue;
+      if (state.fx.vorahnungSh > 0 && q && q.length > 0) {
+        const e = q.shift();
+        dirX = e.dirX; dirY = e.dirY;
+        // Don't refill — the queue runs down across multiple hiccups.
+      } else {
+        dirX = (Math.random() - 0.5);
+        dirY = (Math.random() * 0.7) - 0.35;
+      }
+      w.hiccupVelX += dirX * HICCUP_MAG;
+      w.hiccupVelY += dirY * HICCUP_MAG;
       // Hiccup itself doesn't add promille — it's just a camera lurch.
     }
     // Geduld halves frequency for the current wave by doubling the cadence.
@@ -3222,6 +3345,8 @@ function restartSession() {
     if (state.fx[k] === null || typeof state.fx[k] === 'object') state.fx[k] = null;
   }
   state.fx.nextKickX = null; state.fx.nextKickY = null;
+  state.fx.vorahnungQueue = [];
+  finishZinsenPending();
   setAdlerVisual(false);
   reloadBolts();
   respawnApple();
