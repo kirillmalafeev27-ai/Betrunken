@@ -229,33 +229,32 @@
   #score-pop.z-mid    { color: var(--accent); }
   #score-pop.z-outer  { color: #b9b1a0; }
 
-  /* Persistent reminder shown when no bonus tile is armed — nudges the
-     player to pick a category before each shot. Disappears as soon as a
-     tile is selected. */
+  /* Transient reminder — flashed only when the player tries to fire without
+     an armed bonus tile. Fades out on its own. */
   #pick-reminder {
     position: absolute;
     top: 58%;
     left: 50%;
-    transform: translate(-50%, -50%);
-    padding: 9px 18px;
-    background: rgba(20,18,16,0.86);
-    border: 1px solid rgba(200,144,96,0.45);
+    transform: translate(-50%, -50%) scale(0.85);
+    padding: 11px 22px;
+    background: rgba(20,18,16,0.92);
+    border: 1px solid rgba(200,144,96,0.55);
     border-radius: 10px;
     color: var(--accent);
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.8);
     pointer-events: none;
-    z-index: 5;
+    z-index: 6;
     opacity: 0;
-    transition: opacity 0.25s ease-out;
-    animation: pickPulse 1.6s ease-in-out infinite;
+    transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+    white-space: nowrap;
   }
-  #pick-reminder.on { opacity: 1; }
-  @keyframes pickPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(200,144,96,0.0); }
-    50%      { box-shadow: 0 0 18px 2px rgba(200,144,96,0.45); }
+  #pick-reminder.on {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 0 24px 2px rgba(200,144,96,0.55);
   }
 
   /* Bonus bar — 5 category tiles each containing a row of sub-quads.
@@ -818,7 +817,7 @@
   <div id="crosshair"><div class="ring"></div></div>
   <div id="score-pop"></div>
   <div id="streak-pop"></div>
-  <div id="pick-reminder">Выбери сначала бонус, ты же не хочешь проиграть?</div>
+  <div id="pick-reminder">Не стреляет? А ты выбери сначала бонус.</div>
 
   <div id="ammo">
     <span class="label">БОЛТЫ</span>
@@ -1490,19 +1489,24 @@ function renderBonusBar() {
   updatePickReminder();
 }
 
-function updatePickReminder() {
+let _pickReminderTimer = null;
+function flashPickReminder() {
   const el = document.getElementById('pick-reminder');
   if (!el) return;
+  // Block while overlays are up — the message is for in-game shot attempts only.
   const startEl = document.getElementById('start');
-  const startUp = startEl && startEl.style.display !== 'none';
+  if (startEl && startEl.style.display !== 'none') return;
   const se = document.getElementById('session-end');
-  const seUp = se && se.classList.contains('on');
-  const sp = document.getElementById('sub-picker');
-  const spUp = sp && sp.classList.contains('on');
-  // Show only during actual gameplay AND when nothing is armed.
-  const show = !state.selectedTileId && !startUp && !seUp && !spUp;
-  el.classList.toggle('on', show);
+  if (se && se.classList.contains('on')) return;
+  // Re-trigger animation cleanly even on rapid back-to-back attempts.
+  el.classList.remove('on');
+  void el.offsetWidth;
+  el.classList.add('on');
+  clearTimeout(_pickReminderTimer);
+  _pickReminderTimer = setTimeout(() => el.classList.remove('on'), 1600);
 }
+// Kept callable from the tick loop as a no-op so existing call sites work.
+function updatePickReminder() {}
 
 function updateBonusOpacities() {
   const bar = document.getElementById('bonus-bar');
@@ -2624,6 +2628,8 @@ function tryShoot() {
   if (picker && picker.classList.contains('on')) return;
   const se = document.getElementById('session-end');
   if (se && se.classList.contains('on')) return;
+  // No shot without an armed bonus — flash the reminder and bail.
+  if (!state.selectedTileId) { flashPickReminder(); return; }
   if (state.boltsLeft <= 0) { AudioFx.miss(); return; }
   state.boltsLeft--;
   state.lastShotTime = state.t;
