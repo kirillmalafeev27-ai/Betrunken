@@ -725,9 +725,9 @@
     box-shadow: 0 0 18px 1px rgba(143,217,154,0.5);
   }
   #zinsen-prompt.on { opacity: 1; }
-  body.zinsen { cursor: auto; }
-  body.zinsen #app { cursor: auto; }
-  body.zinsen canvas { cursor: auto; }
+  body.zinsen, body.cursor-on { cursor: auto; }
+  body.zinsen #app, body.cursor-on #app { cursor: auto; }
+  body.zinsen canvas, body.cursor-on canvas { cursor: auto; }
 
   /* Rhythmus metronome bar — a thin horizontal track with a moving thumb */
   #rhythmus-bar {
@@ -1025,6 +1025,7 @@
         <div class="key"><b>Мышь</b> — целиться</div>
         <div class="key"><b>R</b> — новое яблоко</div>
         <div class="key"><b>F</b> — перезарядка</div>
+        <div class="key"><b>Esc</b> — курсор (клик по сцене — обратно)</div>
       </div>
       <div class="keys" id="keys-touch" style="display:none">
         <div class="key"><b>Палец</b> — целиться</div>
@@ -1468,9 +1469,9 @@ const BONUS_CATEGORIES = [
       { id: 'atem',     pos: 1, name: 'Atem anhalten', desc: '−50% опьянения/дрейфа на 4 сек (нужна серия 2+)', requiresStreak: 2 },
   ]},
   { id: 'aim', title: 'Прицел', subs: [
-      { id: 'leuchtspur', pos: 4, name: 'Leuchtspur', desc: 'видна траектория болта пунктиром' },
-      { id: 'zoom',       pos: 3, name: 'Zoom',       desc: 'приближение, точность выше' },
-      { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'болт чуть-чуть магнитится к цели' },
+      { id: 'leuchtspur', pos: 4, name: 'Leuchtspur', desc: 'до конца волны: трасса болта пунктиром' },
+      { id: 'zoom',       pos: 3, name: 'Zoom',       desc: 'до конца волны: приближение, выше точность' },
+      { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'до конца волны: болт чуть магнитится к цели' },
       { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'все яблоки ×1.5 на 3 секунды' },
   ]},
   { id: 'res', title: 'Ресурсы', subs: [
@@ -1766,10 +1767,11 @@ function applySubEffect(subId) {
       if (fx.adlerSec <= 0) setAdlerVisual(true);
       fx.adlerSec = 3.0;
       break;
+    // Aim-category effects (except Adlerauge) now last until the wave
+    // changes — the value 1 here is just a flag, not a counter. Cleared
+    // in startWaveBreather alongside Geduld and Schild.
     case 'magnet':     fx.magnetSh = 1; break;
-    // Zoom held for ~3 s as a real-time timer so the FOV change covers
-    // aim and shot without snapping back mid-frame.
-    case 'zoom':       fx.zoomSh = 3.0; break;
+    case 'zoom':       fx.zoomSh = 1; break;
     case 'leuchtspur': fx.leuchtspurSh = 1; break;
     case 'kocher':
       state.boltsLeft = Math.min(4, state.boltsLeft + 2);
@@ -1864,12 +1866,12 @@ function updateAmmo() {
   const reload = document.getElementById('reload-btn');
   if (reload) reload.classList.toggle('on', state.boltsLeft <= 0);
 }
+// Reload only refills the quiver. Active sub-effects, the armed bonus
+// tile, streak count and bonus-tile timers are all preserved — this is a
+// quick "more arrows" action, not a run reset. The Сброс button below
+// handles the full clear separately.
 function reloadBolts() {
   state.boltsLeft = 4;
-  for (const tile of state.bonusTiles) tile.t = tile.subs.length;
-  state.streak = 0;
-  state.selectedTileId = null;
-  renderBonusBar();
   updateAmmo();
 }
 
@@ -1936,7 +1938,7 @@ function tickFxTimers(realDt) {
   if (fx.rhythmusSec > 0) fx.rhythmusSec = Math.max(0, fx.rhythmusSec - realDt);
   // Anker / Zoom are interpreted as real-time windows (4 s / 3 s).
   if (fx.ankerSh > 0)     fx.ankerSh     = Math.max(0, fx.ankerSh     - realDt);
-  if (fx.zoomSh > 0)      fx.zoomSh      = Math.max(0, fx.zoomSh      - realDt);
+  // Zoom is wave-bound now — cleared in startWaveBreather, not by real-time decay.
   // Adlerauge — auto-revert the apple zoom when the 3 s window expires.
   if (fx.adlerSec > 0) {
     const prev = fx.adlerSec;
@@ -1996,9 +1998,9 @@ function updateActiveFx() {
   if (fx.rhythmusSec > 0) items.push('Rhythmus ' + fx.rhythmusSec.toFixed(0) + 'с');
   if (fx.ankerSh > 0)     items.push('Anker ' + (fx.ankerLockH ? 'H' : 'V') + ' ' + fx.ankerSh.toFixed(1) + 'с');
   if (fx.adlerSec > 0)    items.push('Adlerauge ×1.5 ' + fx.adlerSec.toFixed(1) + 'с');
-  if (fx.magnetSh > 0)    items.push('Magnet');
-  if (fx.zoomSh > 0)      items.push('Zoom ' + fx.zoomSh.toFixed(1) + 'с');
-  if (fx.leuchtspurSh > 0) items.push('Leuchtspur');
+  if (fx.magnetSh > 0)    items.push('Magnet (волна)');
+  if (fx.zoomSh > 0)      items.push('Zoom (волна)');
+  if (fx.leuchtspurSh > 0) items.push('Leuchtspur (волна)');
   if (fx.vorahnungSh > 0) items.push('Vorahnung');
   if (fx.geistSh > 0)     items.push('Geist-Pfeil');
   if (fx.doppelSh > 0)    items.push('Doppelschuss (2 болта)');
@@ -2154,7 +2156,10 @@ $('reset').addEventListener('click', () => {
   state.fx.vorahnungQueue = [];
   finishZinsenPending();
   setAdlerVisual(false);  // safe no-op if nothing was scaled
+  for (const tile of state.bonusTiles) tile.t = tile.subs.length;
+  state.selectedTileId = null;
   reloadBolts();
+  renderBonusBar();
   updateActiveFx();
   updateStats();
 });
@@ -2182,9 +2187,21 @@ window.addEventListener('mousedown', e => {
   markInput();
   if (document.getElementById('start').style.display !== 'none') return;
   if (isHudTarget(e.target)) return;
+  // If the system cursor was opened with Escape, a click on the game area
+  // hides it again. The click does NOT also fire a shot — it's a "resume
+  // play" gesture, not an attack.
+  if (document.body.classList.contains('cursor-on')) {
+    document.body.classList.remove('cursor-on');
+    return;
+  }
   tryShoot();
 });
 window.addEventListener('keydown', e => {
+  if (e.code === 'Escape') {
+    document.body.classList.add('cursor-on');
+    e.preventDefault();
+    return;
+  }
   if (document.getElementById('start').style.display !== 'none') return;
   markInput();
   if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
@@ -2864,7 +2881,7 @@ function tryShoot() {
     if (best) {
       primaryDir = primaryDir.lerp(best, 0.25).normalize();
     }
-    state.fx.magnetSh--;
+    // Magnet is wave-bound; not consumed per shot.
   }
 
   // Doppelschuss: ONE click → TWO bolts with a small horizontal spread, so
@@ -2942,7 +2959,7 @@ function tryShoot() {
       resolved: false,
     });
   }
-  if (leuchtspurOn) state.fx.leuchtspurSh--;
+  // Leuchtspur is wave-bound; not consumed per shot.
 
   state.shots++;
   updateStats();
@@ -3082,6 +3099,10 @@ function startWaveBreather(num) {
   // Per-wave bonuses expire when the wave changes.
   state.fx.schild = 0;
   state.fx.geduld = 0;
+  // Aim-category effects (except Adlerauge) are wave-bound — drop them.
+  state.fx.magnetSh = 0;
+  state.fx.zoomSh = 0;
+  state.fx.leuchtspurSh = 0;
   state.wave.num = num;
   state.wave.phase = 'breather';
   state.wave.timer = WAVE_BREATHER_SEC;
@@ -3348,7 +3369,10 @@ function restartSession() {
   state.fx.vorahnungQueue = [];
   finishZinsenPending();
   setAdlerVisual(false);
+  for (const tile of state.bonusTiles) tile.t = tile.subs.length;
+  state.selectedTileId = null;
   reloadBolts();
+  renderBonusBar();
   respawnApple();
   startWaveBreather(1);
   updateStats();
