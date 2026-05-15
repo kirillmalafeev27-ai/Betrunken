@@ -1566,8 +1566,14 @@ function renderBonusBar() {
       // Zinsen second-pick mode: clicking ANY tile immediately opens its
       // picker instead of toggling the armed selection.
       if (state.fx.zinsenPending) {
-        finishZinsenPending();
+        // Open the picker BEFORE finishing pending — openSubPicker's
+        // unlockPointer is then idempotent and we skip the brief lock
+        // attempt that finishZinsenPending would otherwise trigger.
         openSubPicker(tile.id);
+        state.fx.zinsenPending = false;
+        document.body.classList.remove('zinsen');
+        const p = document.getElementById('zinsen-prompt');
+        if (p) p.classList.remove('on');
         markInput();
         return;
       }
@@ -1678,6 +1684,8 @@ function openSubPicker(tileId) {
   _pickerRemaining = 1;
   renderSubPicker();
   document.getElementById('sub-picker').classList.add('on');
+  // Release pointer lock so the player can click the options.
+  unlockPointer();
   return true;
 }
 function renderSubPicker() {
@@ -1730,8 +1738,11 @@ function renderSubPicker() {
           // the system cursor so the player can click another category.
           const zinsenWasOn = state.fx.zinsen;
           state.fx.zinsen = false;
-          closeSubPicker();
+          // Set pending BEFORE closing the picker so closeSubPicker's
+          // lockPointer attempt sees zinsenPending and stays unlocked —
+          // avoids a one-frame lock/unlock flicker.
           if (zinsenWasOn) startZinsenPending();
+          closeSubPicker();
         } else {
           renderSubPicker();
         }
@@ -1840,6 +1851,8 @@ function setAdlerVisual(on) {
 function closeSubPicker() {
   const panel = document.getElementById('sub-picker');
   if (panel) panel.classList.remove('on');
+  // Re-trap the cursor unless another modal needs it.
+  lockPointer();
 }
 
 // Zinsen pending — after the first paid pick, prompt the player to choose
@@ -1849,12 +1862,14 @@ function startZinsenPending() {
   document.body.classList.add('zinsen');
   const p = document.getElementById('zinsen-prompt');
   if (p) p.classList.add('on');
+  unlockPointer();
 }
 function finishZinsenPending() {
   state.fx.zinsenPending = false;
   document.body.classList.remove('zinsen');
   const p = document.getElementById('zinsen-prompt');
   if (p) p.classList.remove('on');
+  lockPointer();
 }
 
 // Ammo display
@@ -2169,11 +2184,77 @@ $('respawn').addEventListener('click', respawnApple);
 // Input
 // ---------------------------------------------------------------------------
 function markInput() { state.lastInputTime = state.t; }
+// Virtual cursor — single source of truth for aim. When pointer-lock is
+// engaged we accumulate movement deltas (the OS cursor is hidden and
+// trapped in the window); when unlocked we just track clientX/Y so the
+// system cursor and reticle stay in sync.
+const _vCursor = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+function _applyAimFromVCursor() {
+  state.aim.x = (_vCursor.x / window.innerWidth) * 2 - 1;
+  state.aim.y = -((_vCursor.y / window.innerHeight) * 2 - 1);
+}
 window.addEventListener('mousemove', e => {
-  state.aim.x = (e.clientX / window.innerWidth) * 2 - 1;
-  state.aim.y = -((e.clientY / window.innerHeight) * 2 - 1);
+  if (document.pointerLockElement) {
+    _vCursor.x = Math.max(0, Math.min(window.innerWidth - 1, _vCursor.x + (e.movementX || 0)));
+    _vCursor.y = Math.max(0, Math.min(window.innerHeight - 1, _vCursor.y + (e.movementY || 0)));
+  } else {
+    _vCursor.x = e.clientX;
+    _vCursor.y = e.clientY;
+  }
+  _applyAimFromVCursor();
   markInput();
 });
+window.addEventListener('resize', () => {
+  // Keep the virtual cursor inside the new viewport bounds.
+  _vCursor.x = Math.min(_vCursor.x, window.innerWidth - 1);
+  _vCursor.y = Math.min(_vCursor.y, window.innerHeight - 1);
+});
+
+// Pointer-lock helpers. Lock keeps the cursor trapped in the canvas while
+// the player is actively aiming; modals (sub-picker, session-end, Zinsen
+// pending, start screen) and the explicit Esc gesture release it.
+function pointerLockAllowed() {
+  if (IS_TOUCH) return false;
+  if (document.body.classList.contains('cursor-on')) return false;
+  const startEl = document.getElementById('start');
+  if (startEl && startEl.style.display !== 'none') return false;
+  const sp = document.getElementById('sub-picker');
+  if (sp && sp.classList.contains('on')) return false;
+  const se = document.getElementById('session-end');
+  if (se && se.classList.contains('on')) return false;
+  if (state.fx && state.fx.zinsenPending) return false;
+  return true;
+}
+function lockPointer() {
+  if (!pointerLockAllowed()) return;
+  if (document.pointerLockElement) return;
+  const el = document.getElementById('app');
+  if (!el || !el.requestPointerLock) return;
+  try {
+    const p = el.requestPointerLock();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) { /* user gesture missing — silently ignore */ }
+}
+function unlockPointer() {
+  if (document.pointerLockElement && document.exitPointerLock) {
+    document.exitPointerLock();
+  }
+}
+document.addEventListener('pointerlockchange', () => {
+  // Treat the browser-managed lock state as the source of truth for
+  // body.cursor-on: hidden during lock, visible otherwise.
+  if (document.pointerLockElement) {
+    document.body.classList.remove('cursor-on');
+  } else {
+    document.body.classList.add('cursor-on');
+  }
+});
+document.addEventListener('pointerlockerror', () => {
+  // Lock request rejected (no user gesture / not focused / etc.) — fall
+  // back to showing the cursor so the player can still click to retry.
+  document.body.classList.add('cursor-on');
+});
+
 function isHudTarget(t) {
   return t && (t.closest('.ctl') || t.closest('.hud-card') ||
                t.closest('#touch-controls') || t.closest('#spawn-editor') ||
@@ -2187,19 +2268,29 @@ window.addEventListener('mousedown', e => {
   markInput();
   if (document.getElementById('start').style.display !== 'none') return;
   if (isHudTarget(e.target)) return;
-  // If the system cursor was opened with Escape, a click on the game area
-  // hides it again. The click does NOT also fire a shot — it's a "resume
-  // play" gesture, not an attack.
-  if (document.body.classList.contains('cursor-on')) {
+  // Pointer may not be locked: either the player pressed Escape, or the
+  // initial lock request didn't go through. Always sync the virtual
+  // cursor to the click position and try to re-lock so the cursor can't
+  // drift outside the window. If the player explicitly opened the cursor
+  // (body.cursor-on), absorb the click as a "resume play" gesture; if
+  // the lock simply failed at boot, allow the click to also fire.
+  if (!document.pointerLockElement) {
+    _vCursor.x = e.clientX; _vCursor.y = e.clientY;
+    _applyAimFromVCursor();
+    const explicitlyOpened = document.body.classList.contains('cursor-on');
     document.body.classList.remove('cursor-on');
-    return;
+    lockPointer();
+    if (explicitlyOpened) return;
   }
   tryShoot();
 });
 window.addEventListener('keydown', e => {
   if (e.code === 'Escape') {
+    // The browser auto-exits pointer lock on Esc — our pointerlockchange
+    // handler then sets body.cursor-on. We just make sure the cursor is
+    // visible immediately even before the change event lands.
     document.body.classList.add('cursor-on');
-    e.preventDefault();
+    unlockPointer();
     return;
   }
   if (document.getElementById('start').style.display !== 'none') return;
@@ -2528,6 +2619,8 @@ async function boot() {
   document.getElementById('start-btn').addEventListener('click', () => {
     AudioFx.ensure();
     document.getElementById('start').style.display = 'none';
+    document.body.classList.remove('cursor-on');
+    lockPointer();
   });
   document.getElementById('open-spawn-editor').addEventListener('click', openSpawnEditor);
 }
@@ -3349,6 +3442,7 @@ function endSession() {
     '<div class="row"><span>Финальный Promille</span><b>' + state.promille.toFixed(0) + '</b></div>';
   document.getElementById('se-stats').innerHTML = html;
   document.getElementById('session-end').classList.add('on');
+  unlockPointer();
 }
 function restartSession() {
   document.getElementById('session-end').classList.remove('on');
@@ -3378,6 +3472,7 @@ function restartSession() {
   updateStats();
   applyPromilleUi();
   updateActiveFx();
+  lockPointer();
 }
 document.getElementById('se-restart').addEventListener('click', (e) => {
   e.preventDefault(); e.stopPropagation();
