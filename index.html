@@ -229,6 +229,35 @@
   #score-pop.z-mid    { color: var(--accent); }
   #score-pop.z-outer  { color: #b9b1a0; }
 
+  /* Persistent reminder shown when no bonus tile is armed — nudges the
+     player to pick a category before each shot. Disappears as soon as a
+     tile is selected. */
+  #pick-reminder {
+    position: absolute;
+    top: 58%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 9px 18px;
+    background: rgba(20,18,16,0.86);
+    border: 1px solid rgba(200,144,96,0.45);
+    border-radius: 10px;
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity 0.25s ease-out;
+    animation: pickPulse 1.6s ease-in-out infinite;
+  }
+  #pick-reminder.on { opacity: 1; }
+  @keyframes pickPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(200,144,96,0.0); }
+    50%      { box-shadow: 0 0 18px 2px rgba(200,144,96,0.45); }
+  }
+
   /* Bonus bar — 5 category tiles each containing a row of sub-quads.
      The rightmost sub-quad (position 1) drains first; opacity fades to 0
      as its share of the timer runs out. */
@@ -711,6 +740,7 @@
   <div id="crosshair"><div class="ring"></div></div>
   <div id="score-pop"></div>
   <div id="streak-pop"></div>
+  <div id="pick-reminder">Выбери сначала бонус, ты же не хочешь проиграть?</div>
 
   <div id="ammo">
     <span class="label">БОЛТЫ</span>
@@ -836,6 +866,7 @@
         <div class="key"><b>ЛКМ</b> / <b>Space</b> — выстрел</div>
         <div class="key"><b>Мышь</b> — целиться</div>
         <div class="key"><b>R</b> — новое яблоко</div>
+        <div class="key"><b>F</b> — перезарядка</div>
       </div>
       <div class="keys" id="keys-touch" style="display:none">
         <div class="key"><b>Палец</b> — целиться</div>
@@ -1176,8 +1207,10 @@ const state = {
     phase: 'breather',   // 'breather' (3s intro) | 'active' (45s) | 'ended'
     timer: 3.0,          // seconds left in current phase
     waveT: 0,            // seconds elapsed inside the active wave
-    hiccupX: 0, hiccupY: 0,   // accumulated hiccup offset on camera (rad)
-    hiccupCooldown: 2.5,      // s until next hiccup chance
+    hiccupX: 0, hiccupY: 0,        // persistent rotational offset (rad)
+    hiccupVelX: 0, hiccupVelY: 0,  // velocity that integrates into hiccupX/Y
+                                   //   — gives the smooth recoil-like motion
+    hiccupCooldown: 2.5,           // s until next hiccup
     tunnel: 0,                // current tunnel-vision intensity 0..1
     doublesActive: false,     // wave-3 doubling has triggered (after 15 s)
   },
@@ -1344,6 +1377,21 @@ function renderBonusBar() {
     bar.appendChild(el);
   }
   updateBonusOpacities();
+  updatePickReminder();
+}
+
+function updatePickReminder() {
+  const el = document.getElementById('pick-reminder');
+  if (!el) return;
+  const startEl = document.getElementById('start');
+  const startUp = startEl && startEl.style.display !== 'none';
+  const se = document.getElementById('session-end');
+  const seUp = se && se.classList.contains('on');
+  const sp = document.getElementById('sub-picker');
+  const spUp = sp && sp.classList.contains('on');
+  // Show only during actual gameplay AND when nothing is armed.
+  const show = !state.selectedTileId && !startUp && !seUp && !spUp;
+  el.classList.toggle('on', show);
 }
 
 function updateBonusOpacities() {
@@ -1526,6 +1574,8 @@ function applySubEffect(subId) {
       fx.schnaps = 0;
       state.wave.hiccupX = 0;
       state.wave.hiccupY = 0;
+      state.wave.hiccupVelX = 0;
+      state.wave.hiccupVelY = 0;
       state.wave.tunnel = 0;
       state.wave.hiccupCooldown = 6.0;
       state.promille = Math.max(0, state.promille - 25);
@@ -1874,6 +1924,7 @@ window.addEventListener('keydown', e => {
   markInput();
   if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
   if (e.code === 'KeyR') { respawnApple(); }
+  if (e.code === 'KeyF') { reloadBolts(); }
 });
 
 // Touch input — drag anywhere on the canvas to move the reticle (same
@@ -2833,40 +2884,45 @@ function tickWave(realDt) {
   // Pendulum motion: update apple positions each frame.
   if (debuffs.includes('pendulum')) tickPendulum();
 
-  // Promille creep — base + per-wave bonus so each wave ratchets pressure.
-  const waveBonus = Math.max(0, state.wave.num - 1) * 0.35;
-  state.promille = Math.min(100, state.promille + realDt * (0.9 + waveBonus));
+  // Promille creep — slow base + small per-wave bonus.
+  const waveBonus = Math.max(0, state.wave.num - 1) * 0.12;
+  state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus));
   applyPromilleUi();
 }
 
 function tickHiccup(realDt, idleSec) {
   const w = state.wave;
-  // Hiccups fire periodically even when the player is aiming — they only
-  // get FASTER and HARDER when the player has been idle for a while.
+  // A hiccup adds an IMPULSE to a velocity (rad/s). Each frame we damp the
+  // velocity and integrate it into the persistent offset. This produces a
+  // smooth recoil-like lurch instead of a discrete frame jump, and because
+  // the velocity decays toward zero on its own — NOT toward an origin —
+  // the camera comes to rest wherever the lurch left it.
   w.hiccupCooldown -= realDt;
   if (w.hiccupCooldown <= 0) {
     if (state.fx.schild) {
       state.fx.schild = false;  // Schild eats one tick
     } else {
-      const idleBoost = idleSec > 4 ? 1.8 : 1.0;
-      // Big enough to LOOK like a hiccup — visible camera lurch and a
-      // permanent offset that drifts back very slowly.
-      const sx = (Math.random() - 0.5) * 0.32 * idleBoost;
-      const sy = (Math.random() - 0.5) * 0.26 * idleBoost;
-      w.hiccupX = Math.max(-0.85, Math.min(0.85, w.hiccupX + sx));
-      w.hiccupY = Math.max(-0.65, Math.min(0.65, w.hiccupY + sy));
-      // Every hiccup also bumps promille — idling is genuinely punishing.
-      state.promille = Math.min(100, state.promille + (idleSec > 4 ? 4.5 : 2.0));
-      // And kick the spring so there's an immediate visible jolt.
-      state.cameraSwayVel.x += sx * 1.8;
-      state.cameraSwayVel.y += sy * 1.8;
+      // Direction is random; magnitude is consistent so it always reads as
+      // a "hiccup". The pitch component is biased slightly downward so the
+      // hiccup feels like a real lurch.
+      const dirX = (Math.random() - 0.5);
+      const dirY = (Math.random() * 0.7) - 0.35;
+      const mag = 3.2;
+      w.hiccupVelX += dirX * mag;
+      w.hiccupVelY += dirY * mag;
+      state.promille = Math.min(100, state.promille + 2.0);
     }
-    // Cadence: ~4–5 s when engaged, ~1.8–2.8 s when idling.
-    w.hiccupCooldown = (idleSec > 4 ? 1.8 : 4.0) + Math.random() * 1.0;
+    // Fixed cadence ~5 s (small jitter so it doesn't feel mechanical).
+    w.hiccupCooldown = 5.0 + (Math.random() - 0.5) * 0.8;
   }
-  // Slow decay of the persistent offset (much slower than recoil).
-  w.hiccupX *= Math.exp(-realDt * 0.06);
-  w.hiccupY *= Math.exp(-realDt * 0.06);
+  // Damp the velocity. No spring pulling it toward zero offset — only the
+  // velocity decays. The offset stays where the velocity left it.
+  const vDamp = Math.exp(-realDt * 5.5);
+  w.hiccupVelX *= vDamp;
+  w.hiccupVelY *= vDamp;
+  // Integrate.
+  w.hiccupX = Math.max(-1.1, Math.min(1.1, w.hiccupX + w.hiccupVelX * realDt));
+  w.hiccupY = Math.max(-0.8, Math.min(0.8, w.hiccupY + w.hiccupVelY * realDt));
 }
 
 function tickPendulum() {
@@ -2991,6 +3047,7 @@ function restartSession() {
   state.claimedSubs.length = 0;
   state.promille = 0;
   state.wave.hiccupX = 0; state.wave.hiccupY = 0;
+  state.wave.hiccupVelX = 0; state.wave.hiccupVelY = 0;
   state.wave.tunnel = 0;
   document.getElementById('tunnel').style.opacity = '0';
   for (const k of Object.keys(state.fx)) {
@@ -3111,21 +3168,9 @@ function tick() {
   camera.position.z = CAMERA_BASE_POS.z + (ankerH ? 0 : swayZ * state.cameraDrift * 0.15 * posDriftMul);
   camera.position.y = CAMERA_BASE_POS.y + (ankerV ? 0 : swayY * state.cameraDrift * 0.07 * posDriftMul);
 
-  // Idle drift — after 5 s of no input, the camera slowly tilts down
-  // (and slightly drifts the yaw), as if the player's hand has gone slack.
-  // Applied directly to the final rotation, NOT through the aim spring,
-  // so it isn't damped or "fought" by the drunken sway feedback.
-  // Geduld doubles the idle threshold for 30 s.
-  const IDLE_THRESHOLD = (state.fx.geduld > 0 ? 10.0 : 5.0);
-  const IDLE_PITCH_RATE = 0.10;    // rad/s downward while idle
-  const idleSec = state.t - state.lastInputTime;
-  if (idleSec > IDLE_THRESHOLD) {
-    state.idleDrift += IDLE_PITCH_RATE * dt;
-    // Clamp so the camera doesn't roll past straight-down.
-    if (state.idleDrift > 1.2) state.idleDrift = 1.2;
-  } else {
-    state.idleDrift = 0;           // snap back instantly on any input
-  }
+  // Auto-tilt-down on idle was removed by request — the camera stays where
+  // the player left it. Hiccups still nudge it (and don't spring back).
+  state.idleDrift = 0;
 
   // Compose final camera orientation.
   // Hiccup (wave 2+): persistent offset that doesn't decay through the aim
@@ -3281,6 +3326,7 @@ function tick() {
 
   // Bonus tile drain
   tickBonusTimers(dt);
+  updatePickReminder();
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
