@@ -744,6 +744,7 @@
     background: rgba(10,9,8,0.7);
     backdrop-filter: blur(4px);
     z-index: 50;
+    cursor: auto;
   }
   #start .panel {
     background: var(--panel);
@@ -3189,6 +3190,33 @@ applyPromilleUi();
 const clock = new THREE.Clock();
 function tick() {
   const realDt = Math.min(0.05, clock.getDelta());
+  const startEl = document.getElementById('start');
+  const frozen = startEl && startEl.style.display !== 'none';
+
+  if (frozen) {
+    // Lock the camera to its base pose so the crossbow doesn't sway on the
+    // start screen. Skip all per-frame game logic (aim spring, sway, recoil,
+    // bolts, fragments, fx timers, wave timers, bonus drain) — only render.
+    camera.position.copy(CAMERA_BASE_POS);
+    camera.rotation.x = BASE_PITCH;
+    camera.rotation.y = BASE_YAW;
+    state.cameraSway.set(0, 0);
+    state.cameraSwayVel.set(0, 0);
+    state.aimSmooth.set(0, 0);
+    state.aimVel.set(0, 0);
+    state.recoilOffset = 0;
+    state.recoilVel = 0;
+    state.wave.hiccupX = state.wave.hiccupY = 0;
+    state.wave.hiccupVelX = state.wave.hiccupVelY = 0;
+    // Keep the player's last shot/input timestamps fresh so wave-2 idle
+    // debuffs don't trigger the moment the game un-pauses.
+    state.lastInputTime = state.t;
+    state.lastShotTime = state.t;
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+    return;
+  }
+
   // Zeitlupe: while active, game logic ticks at 30 % speed. Effect timers
   // and DOM/UI events still use real time.
   const slow = state.fx.zeitlupe > 0 ? 0.3 : 1.0;
