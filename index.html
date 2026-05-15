@@ -499,17 +499,20 @@
   #ammo #reload-btn.on { display: inline-block; }
   #ammo #reload-btn:hover { background: rgba(230,110,80,0.95); }
 
-  /* Wave 3 — debuff overlays: tunnel vision vignette. Opacity is driven from JS. */
+  /* Wave-2 tunnel vision vignette. Opacity is driven from JS each frame
+     (no CSS transition — it would smear the per-frame lerp). Z-index 3
+     sits ABOVE the canvas but UNDER every HUD element, so the periphery
+     darkens around the scene without burying the player's controls. */
   #tunnel {
     position: absolute; inset: 0;
     pointer-events: none;
     z-index: 3;
     background: radial-gradient(circle at center,
-      rgba(0,0,0,0) 30%,
-      rgba(0,0,0,0.45) 55%,
-      rgba(0,0,0,0.92) 85%);
+      rgba(0,0,0,0) 14%,
+      rgba(0,0,0,0.65) 38%,
+      rgba(0,0,0,0.95) 65%,
+      rgba(0,0,0,1) 100%);
     opacity: 0;
-    transition: opacity 0.45s;
   }
 
   /* Wave announcement banner */
@@ -546,6 +549,26 @@
     text-shadow: 0 2px 0 #1a0e04, 0 0 24px rgba(255,200,80,0.55);
     font-variant-numeric: tabular-nums;
   }
+
+  /* Always-on wave tag — small label on the upper-right corner so the
+     player can see the current wave number and seconds-left at a glance. */
+  #wave-tag {
+    position: absolute;
+    top: 90px;
+    right: 14px;
+    padding: 4px 9px;
+    background: rgba(20,18,16,0.72);
+    border: 1px solid rgba(200,144,96,0.20);
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    font-variant-numeric: tabular-nums;
+    z-index: 5;
+    backdrop-filter: blur(6px);
+  }
+  #wave-tag b { color: var(--accent); font-weight: 700; }
+  #wave-tag .dbg { color: #ff9a6a; font-weight: 700; }
 
   /* Promille meter — top-center under #ammo */
   #promille-meter {
@@ -835,6 +858,8 @@
     <div class="wb-sub"></div>
     <div class="wb-count"></div>
   </div>
+
+  <div id="wave-tag"></div>
 
   <div id="promille-meter">
     <span class="lbl">PROMILLE</span>
@@ -2992,13 +3017,14 @@ function tickWave(realDt) {
   // otherwise the wave-2 debuffs basically never fire on an active aimer.
   const idleSec = state.t - state.lastShotTime;
   if (debuffs.includes('hiccup')) tickHiccup(realDt, idleSec);
-  // Tunnel: baseline vignette as soon as wave 2 starts (so the player sees
-  // SOMETHING is wrong), ramps hard with idle.
+  // Tunnel: strong baseline vignette the moment wave 2 starts so the player
+  // can't miss it; ramps further with idle. Combined with the wide-corner
+  // gradient this gives a clear "edges going black" feel.
   let targetTunnel = 0;
   if (debuffs.includes('tunnel')) {
-    targetTunnel = 0.22 + Math.min(0.7, Math.max(0, (idleSec - 2) / 6) * 0.7);
+    targetTunnel = 0.55 + Math.min(0.45, Math.max(0, (idleSec - 2) / 5) * 0.45);
   }
-  w.tunnel += (targetTunnel - w.tunnel) * Math.min(1, realDt * 1.6);
+  w.tunnel += (targetTunnel - w.tunnel) * Math.min(1, realDt * 2.0);
   document.getElementById('tunnel').style.opacity = w.tunnel.toFixed(3);
 
   // Wave 3 doubling: triggers 15 s into an active wave that lists 'double'.
@@ -3014,6 +3040,19 @@ function tickWave(realDt) {
   const waveBonus = Math.max(0, state.wave.num - 1) * 0.12;
   state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus));
   applyPromilleUi();
+  updateWaveTag();
+}
+
+function updateWaveTag() {
+  const el = document.getElementById('wave-tag');
+  if (!el) return;
+  const w = state.wave;
+  const cfg = WAVE_CONFIG[w.num - 1];
+  const sec = Math.max(0, Math.ceil(w.timer));
+  const phase = w.phase === 'breather' ? 'передышка' : (w.phase === 'ended' ? 'финал' : 'активна');
+  const debuffs = currentWaveDebuffs();
+  const dbg = debuffs.length ? ' · <span class="dbg">' + debuffs.join('+') + '</span>' : '';
+  el.innerHTML = '<b>' + (cfg ? cfg.title : '—') + '</b> · ' + phase + ' · ' + sec + 'с' + dbg;
 }
 
 function tickHiccup(realDt, idleSec) {
