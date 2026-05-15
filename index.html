@@ -1267,7 +1267,7 @@ const state = {
     // queued / latched
     zeitlupeReady: false, // claimed Zeitlupe, awaits RMB (desktop) / auto-fires (touch)
     zinsen: false,        // next picker grants 2 picks instead of 1
-    schild: false,        // next debuff tick is ignored (no debuffs yet — reserved)
+    schild: 0,            // remaining debuff-tick ignores (cleared at wave end)
     // pre-rolled next kick for Vorahnung
     nextKickX: null, nextKickY: null,
   },
@@ -1396,8 +1396,8 @@ const BONUS_CATEGORIES = [
       { id: 'zinsen',  pos: 1, name: 'Zinsen',  desc: 'следующее попадание — двойной выбор' },
   ]},
   { id: 'def', title: 'Защита', subs: [
-      { id: 'geduld', pos: 3, name: 'Geduld', desc: 'таймер бездействия ×2 на 30 сек' },
-      { id: 'schild', pos: 2, name: 'Schild', desc: 'следующий debuff-тик игнорируется' },
+      { id: 'geduld', pos: 3, name: 'Geduld', desc: 'икота вдвое реже до конца волны' },
+      { id: 'schild', pos: 2, name: 'Schild', desc: 'два debuff-тика в текущей волне игнорируются' },
       { id: 'kaffee', pos: 1, name: 'Kaffee', desc: 'сбрасывает все debuff' },
   ]},
   { id: 'info', title: 'Чтение', subs: [
@@ -1695,8 +1695,15 @@ function applySubEffect(subId) {
       state.promille = Math.max(0, state.promille - 25);
       applyPromilleUi();
       break;
-    case 'schild': fx.schild = true; break;
-    case 'geduld': fx.geduld = 30.0; break;
+    case 'schild':
+      // Two debuff-tick ignores; expires at the next wave transition.
+      fx.schild = 2;
+      break;
+    case 'geduld':
+      // Halve the hiccup frequency until this wave ends. The actual ceiling
+      // is large; tickWave clears it when the wave changes.
+      fx.geduld = 999;
+      break;
     case 'vorahnung':
       fx.vorahnungSh = 1;
       // Pre-roll the next shot's recoil kick so the indicator can preview it.
@@ -1803,7 +1810,7 @@ function tickFxTimers(realDt) {
   if (fx.zeitlupe > 0)    fx.zeitlupe    = Math.max(0, fx.zeitlupe    - realDt);
   if (fx.atem > 0)        fx.atem        = Math.max(0, fx.atem        - realDt);
   if (fx.schnaps > 0)     fx.schnaps     = Math.max(0, fx.schnaps     - realDt);
-  if (fx.geduld > 0)      fx.geduld      = Math.max(0, fx.geduld      - realDt);
+  // Geduld is cleared at the wave transition, not decremented by realDt.
   if (fx.rhythmusSec > 0) fx.rhythmusSec = Math.max(0, fx.rhythmusSec - realDt);
   // Anker / Zoom are interpreted as real-time windows (4 s / 3 s).
   if (fx.ankerSh > 0)     fx.ankerSh     = Math.max(0, fx.ankerSh     - realDt);
@@ -1837,11 +1844,11 @@ function updateActiveFxIfChanged() {
   const fx = state.fx;
   const sig = [
     fx.zeitlupe.toFixed(1), fx.atem.toFixed(1), fx.schnaps.toFixed(1),
-    fx.geduld.toFixed(1), fx.rhythmusSec.toFixed(1),
+    fx.geduld > 0 ? 1 : 0, fx.rhythmusSec.toFixed(1),
     fx.ankerSh.toFixed(1), fx.adlerSh, fx.magnetSh,
     fx.zoomSh.toFixed(1), fx.leuchtspurSh,
     fx.vorahnungSh, fx.geistSh, fx.doppelSh,
-    fx.zeitlupeReady ? 1 : 0, fx.zinsen ? 1 : 0, fx.schild ? 1 : 0,
+    fx.zeitlupeReady ? 1 : 0, fx.zinsen ? 1 : 0, fx.schild,
   ].join('|');
   if (sig === _lastFxSig) return;
   _lastFxSig = sig;
@@ -1857,7 +1864,7 @@ function updateActiveFx() {
   if (fx.zeitlupe > 0)    items.push('Zeitlupe ' + fx.zeitlupe.toFixed(1) + 'с');
   if (fx.atem > 0)        items.push('Atem ' + fx.atem.toFixed(1) + 'с');
   if (fx.schnaps > 0)     items.push('Schnaps ' + fx.schnaps.toFixed(1) + 'с');
-  if (fx.geduld > 0)      items.push('Geduld ' + fx.geduld.toFixed(0) + 'с');
+  if (fx.geduld > 0)      items.push('Geduld (волна)');
   if (fx.rhythmusSec > 0) items.push('Rhythmus ' + fx.rhythmusSec.toFixed(0) + 'с');
   if (fx.ankerSh > 0)     items.push('Anker ' + (fx.ankerLockH ? 'H' : 'V') + ' ' + fx.ankerSh.toFixed(1) + 'с');
   if (fx.adlerSh > 0)     items.push('Adlerauge ×1.5');
@@ -1868,7 +1875,7 @@ function updateActiveFx() {
   if (fx.geistSh > 0)     items.push('Geist-Pfeil');
   if (fx.doppelSh > 0)    items.push('Doppel ×' + fx.doppelSh);
   if (fx.zinsen)          items.push('Zinsen (×2 выбор)');
-  if (fx.schild)          items.push('Schild');
+  if (fx.schild > 0)      items.push('Schild ×' + fx.schild);
   for (const t of items) {
     const p = document.createElement('div');
     p.className = 'fx-pill';
@@ -2930,6 +2937,9 @@ function currentWaveDebuffs() {
 function startWaveBreather(num) {
   const cfg = WAVE_CONFIG[num - 1];
   if (!cfg) return endSession();
+  // Per-wave bonuses expire when the wave changes.
+  state.fx.schild = 0;
+  state.fx.geduld = 0;
   state.wave.num = num;
   state.wave.phase = 'breather';
   state.wave.timer = WAVE_BREATHER_SEC;
@@ -3015,8 +3025,8 @@ function tickHiccup(realDt, idleSec) {
   // the camera comes to rest wherever the lurch left it.
   w.hiccupCooldown -= realDt;
   if (w.hiccupCooldown <= 0) {
-    if (state.fx.schild) {
-      state.fx.schild = false;  // Schild eats one tick
+    if (state.fx.schild > 0) {
+      state.fx.schild--;  // Schild eats up to two ticks per wave
     } else {
       // Direction is random; magnitude is consistent so it always reads as
       // a "hiccup". The pitch component is biased slightly downward so the
@@ -3028,8 +3038,9 @@ function tickHiccup(realDt, idleSec) {
       w.hiccupVelY += dirY * mag;
       // Hiccup itself doesn't add promille — it's just a camera lurch.
     }
-    // Fixed cadence ~5 s (small jitter so it doesn't feel mechanical).
-    w.hiccupCooldown = 5.0 + (Math.random() - 0.5) * 0.8;
+    // Geduld halves frequency for the current wave by doubling the cadence.
+    const geduldMul = state.fx.geduld > 0 ? 2.0 : 1.0;
+    w.hiccupCooldown = (5.0 + (Math.random() - 0.5) * 0.8) * geduldMul;
   }
   // Damp the velocity. No spring pulling it toward zero offset — only the
   // velocity decays. The offset stays where the velocity left it.
