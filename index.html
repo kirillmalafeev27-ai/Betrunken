@@ -272,6 +272,7 @@
     pointer-events: auto;
   }
   .bonus-tile {
+    position: relative;
     background: rgba(20,18,16,0.78);
     border: 1.5px solid rgba(200,144,96,0.22);
     border-radius: 10px;
@@ -283,6 +284,82 @@
     transition: border-color 0.15s, background 0.15s, transform 0.12s;
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Hover tooltip — sketches each sub-bonus in the tile so the player
+     knows what they're arming before committing. Hidden on touch via the
+     :hover gate. */
+  .bonus-tile .tip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    width: 232px;
+    background: rgba(16,14,12,0.96);
+    border: 1px solid rgba(200,144,96,0.35);
+    border-radius: 10px;
+    padding: 10px 12px;
+    text-align: left;
+    color: var(--text);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+    z-index: 8;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.6);
+  }
+  .bonus-tile:hover .tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .bonus-tile .tip .head {
+    font-size: 11px; letter-spacing: 1px; color: var(--accent);
+    text-transform: uppercase; font-weight: 700;
+    margin-bottom: 6px; text-align: center;
+  }
+  .bonus-tile .tip .row {
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 5px 0;
+  }
+  .bonus-tile .tip .row + .row { border-top: 1px solid rgba(255,255,255,0.06); }
+  .bonus-tile .tip .ico {
+    flex: 0 0 18px; width: 18px; height: 18px;
+    background: var(--accent); border-radius: 4px;
+    margin-top: 1px;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.18);
+  }
+  .bonus-tile .tip .body { flex: 1; min-width: 0; }
+  .bonus-tile .tip .name {
+    font-size: 12px; font-weight: 700; color: var(--accent);
+    line-height: 1.2;
+  }
+  .bonus-tile .tip .name .pos {
+    margin-left: 6px;
+    font-size: 9px; color: var(--text-dim);
+    font-weight: 600;
+  }
+  .bonus-tile .tip .desc {
+    font-size: 11px; color: var(--text-dim);
+    line-height: 1.35;
+    margin-top: 2px;
+  }
+  .bonus-tile .tip .price {
+    color: #8fd99a; font-weight: 700; font-size: 11px;
+    white-space: nowrap;
+  }
+  /* Icon variants per sub — purely illustrative, helps scan. */
+  .bonus-tile .tip .ico.zeitlupe   { background: linear-gradient(135deg, #88c0ff, #2a4f8a); }
+  .bonus-tile .tip .ico.anker      { background: linear-gradient(135deg, #c0a878, #5e4528); }
+  .bonus-tile .tip .ico.atem       { background: radial-gradient(circle, #ffd45a 30%, #8a5e1a); }
+  .bonus-tile .tip .ico.adlerauge  { background: radial-gradient(circle, #ffe9a0 25%, #a55e15); }
+  .bonus-tile .tip .ico.magnet     { background: linear-gradient(90deg, #c44a4a 50%, #2a3a6e 50%); }
+  .bonus-tile .tip .ico.zoom       { background: radial-gradient(circle, #fff 20%, #555 70%); }
+  .bonus-tile .tip .ico.leuchtspur { background: repeating-linear-gradient(90deg, #ffd45a 0 4px, transparent 4px 8px); }
+  .bonus-tile .tip .ico.kocher     { background: linear-gradient(45deg, #8a5e1a, #c0a878); }
+  .bonus-tile .tip .ico.zinsen     { background: linear-gradient(135deg, #8fd99a, #2e6a3a); }
+  .bonus-tile .tip .ico.schnaps    { background: linear-gradient(135deg, #d99a3a, #6a4515); }
+  .bonus-tile .tip .ico.kaffee     { background: linear-gradient(135deg, #3a2a1a, #6a4a2a); }
+  .bonus-tile .tip .ico.schild     { background: radial-gradient(circle, #c0c0c0 30%, #4a4a4a); }
+  .bonus-tile .tip .ico.geduld     { background: linear-gradient(135deg, #6a8a5e, #2a3a1e); }
+  .bonus-tile .tip .ico.vorahnung  { background: radial-gradient(circle, #ffd45a 25%, #5a3a1a); }
+  .bonus-tile .tip .ico.rhythmus   { background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+  .bonus-tile .tip .ico.geist      { background: rgba(160,200,255,0.55); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
+  .bonus-tile .tip .ico.doppel     { background: linear-gradient(135deg, var(--accent) 0 45%, transparent 45% 55%, var(--accent) 55% 100%); }
   .bonus-tile:hover { border-color: rgba(200,144,96,0.55); }
   .bonus-tile.selected {
     border-color: var(--accent);
@@ -1368,6 +1445,38 @@ function renderBonusBar() {
       subs.appendChild(s);
     }
     el.appendChild(subs);
+
+    // Hover tooltip listing every sub in this tile with a colored icon,
+    // name + position, price and short description. Built once per render
+    // (cheap — five small DOM panels).
+    const tip = document.createElement('div');
+    tip.className = 'tip';
+    const head = document.createElement('div');
+    head.className = 'head';
+    head.textContent = tile.title;
+    tip.appendChild(head);
+    for (const sub of tile.subs) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const ico = document.createElement('div');
+      ico.className = 'ico ' + sub.id;
+      const body = document.createElement('div');
+      body.className = 'body';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.innerHTML = sub.name +
+        ' <span class="pos">поз.' + sub.pos + ' · €' + priceForSub(sub) + '</span>';
+      const desc = document.createElement('div');
+      desc.className = 'desc';
+      desc.textContent = sub.desc;
+      body.appendChild(name);
+      body.appendChild(desc);
+      row.appendChild(ico);
+      row.appendChild(body);
+      tip.appendChild(row);
+    }
+    el.appendChild(tip);
+
     el.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
       state.selectedTileId = (state.selectedTileId === tile.id) ? null : tile.id;
@@ -2910,7 +3019,7 @@ function tickHiccup(realDt, idleSec) {
       const mag = 3.2;
       w.hiccupVelX += dirX * mag;
       w.hiccupVelY += dirY * mag;
-      state.promille = Math.min(100, state.promille + 2.0);
+      // Hiccup itself doesn't add promille — it's just a camera lurch.
     }
     // Fixed cadence ~5 s (small jitter so it doesn't feel mechanical).
     w.hiccupCooldown = 5.0 + (Math.random() - 0.5) * 0.8;
