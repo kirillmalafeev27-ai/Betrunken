@@ -2699,6 +2699,87 @@ function appleVariantForWave() {
   return { kind: 'normal' };
 }
 
+// Build a cartoony semi-transparent text sprite for hovering above each
+// apple. Drawn into a canvas with a thick stroke + warm fill and a slight
+// tilt for the comic-book feel; the THREE.SpriteMaterial keeps it billboarded
+// at the camera and DEPTH-TESTed so closer apples occlude their own label
+// correctly while not vanishing behind the apple mesh.
+function makeLabelSprite(text) {
+  const W = 256, H = 96;
+  const cnv = document.createElement('canvas');
+  cnv.width = W; cnv.height = H;
+  const ctx = cnv.getContext('2d');
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(-0.06);
+  ctx.font = 'bold 44px "Impact", "Arial Black", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 8;
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.strokeStyle = 'rgba(20, 12, 4, 0.95)';
+  ctx.strokeText(text, 0, 0);
+  // Vertical gradient gives a cartoony "shine".
+  const grad = ctx.createLinearGradient(0, -22, 0, 22);
+  grad.addColorStop(0, '#fff4c2');
+  grad.addColorStop(1, '#ffb04a');
+  ctx.fillStyle = grad;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.85, 0.32, 1);
+  return sprite;
+}
+
+// Sequential label counter — labels persist for each apple's lifetime and
+// don't re-index when apples are shattered. Resets only on full session restart.
+let _nextAppleLabel = 1;
+function attachAppleLabel(entry) {
+  const text = 'Яблоко ' + _nextAppleLabel;
+  _nextAppleLabel++;
+  const sp = makeLabelSprite(text);
+  scene.add(sp);
+  entry.label = sp;
+  entry.labelPhase = Math.random() * Math.PI * 2;
+  positionAppleLabel(entry);
+}
+function positionAppleLabel(entry) {
+  if (!entry.label) return;
+  const p = entry.obj.position;
+  entry.label.position.set(p.x, p.y + (entry.size || 0.2) + 0.42, p.z);
+}
+function tickAppleLabels() {
+  const t = state.t;
+  for (const a of state.apples) {
+    if (!a.label) continue;
+    const p = a.obj.position;
+    const bob = Math.sin(t * 1.8 + a.labelPhase) * 0.05;
+    a.label.position.set(p.x, p.y + (a.size || 0.2) + 0.42 + bob, p.z);
+  }
+}
+function removeAppleLabel(entry) {
+  if (entry && entry.label) {
+    scene.remove(entry.label);
+    if (entry.label.material) {
+      if (entry.label.material.map) entry.label.material.map.dispose();
+      entry.label.material.dispose();
+    }
+    entry.label = null;
+  }
+}
+
 function spawnApple() {
   // Spawn ALL configured points at once. Each entry tracks its hitbox plus
   // any wave-4 metadata (shield hits, pendulum motion, shrink flag).
@@ -2721,7 +2802,7 @@ function spawnApple() {
     const apple = makeAppleMesh(size, opts);
     apple.position.set(spec.x, spec.y, spec.z);
     scene.add(apple);
-    state.apples.push({
+    const entry = {
       obj: apple,
       hitbox: { center: apple.position.clone(), radius: size * 0.55 },
       size,
@@ -2730,7 +2811,9 @@ function spawnApple() {
       shieldHits,
       pendulum,
       spec,
-    });
+    };
+    state.apples.push(entry);
+    attachAppleLabel(entry);
   }
   // Reset wave-3 doubling so it can re-trigger this wave.
   state.wave.doublesActive = false;
@@ -2739,7 +2822,10 @@ function spawnApple() {
 }
 
 function respawnApple() {
-  for (const a of state.apples) scene.remove(a.obj);
+  for (const a of state.apples) {
+    scene.remove(a.obj);
+    removeAppleLabel(a);
+  }
   state.apples.length = 0;
   for (const f of state.fragments) scene.remove(f.obj);
   state.fragments = [];
@@ -3148,6 +3234,7 @@ function shatterApple(idx, impactPoint, impactDir) {
   }
 
   scene.remove(apple);
+  removeAppleLabel(state.apples[idx]);
   state.apples.splice(idx, 1);
   // Any in-flight bolts that were aimed at apples after this one need their
   // index decremented so they still resolve onto the right target.
@@ -3266,6 +3353,8 @@ function tickWave(realDt) {
 
   // Pendulum motion: update apple positions each frame.
   if (debuffs.includes('pendulum')) tickPendulum();
+  // Hover-bob the floating labels above each apple.
+  tickAppleLabels();
 
   // Promille creep — slow base + small per-wave bonus.
   const waveBonus = Math.max(0, state.wave.num - 1) * 0.12;
@@ -3397,6 +3486,9 @@ function triggerDoubling() {
       spec: a.spec,
     };
     state.apples.push(twinEntry);
+    attachAppleLabel(twinEntry);
+    // Reposition the original's label now that the apple moved.
+    positionAppleLabel(a);
 
     // Roll the dice — one is the real target, the other is the phantom.
     if (Math.random() < 0.5) a.isGhost = true; else twinEntry.isGhost = true;
@@ -3465,6 +3557,7 @@ function restartSession() {
   setAdlerVisual(false);
   for (const tile of state.bonusTiles) tile.t = tile.subs.length;
   state.selectedTileId = null;
+  _nextAppleLabel = 1;
   reloadBolts();
   renderBonusBar();
   respawnApple();
@@ -3692,6 +3785,7 @@ function tick() {
               for (let pi = state.apples.length - 1; pi >= 0; pi--) {
                 if (state.apples[pi].pairId === apple.pairId && pi !== b.hitAppleIdx) {
                   scene.remove(state.apples[pi].obj);
+                  removeAppleLabel(state.apples[pi]);
                   state.apples.splice(pi, 1);
                 }
               }
