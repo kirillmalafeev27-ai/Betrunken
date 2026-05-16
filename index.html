@@ -550,6 +550,43 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Manual view nudge — four arrows in a plus layout. They push the
+     camera even past the regular aim bounds, so the player can recover
+     from a runaway hiccup. Works via click/hold AND arrow keys; the
+     buttons stay visible at all times so touch devices can use them. */
+  #view-nudge {
+    position: absolute;
+    right: calc(env(safe-area-inset-right, 0px) + 18px);
+    top: 50%;
+    transform: translateY(-50%);
+    display: grid;
+    grid-template-columns: 36px 36px 36px;
+    grid-template-rows: 36px 36px 36px;
+    gap: 3px;
+    z-index: 5;
+    pointer-events: auto;
+  }
+  #view-nudge .vn {
+    background: rgba(20,18,16,0.62);
+    border: 1px solid rgba(200,144,96,0.32);
+    border-radius: 8px;
+    color: var(--accent);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+  }
+  #view-nudge .vn:hover  { background: rgba(60,42,28,0.78); border-color: var(--accent); }
+  #view-nudge .vn:active { background: rgba(90,60,30,0.92); transform: scale(0.94); }
+  #view-nudge .up    { grid-column: 2; grid-row: 1; }
+  #view-nudge .left  { grid-column: 1; grid-row: 2; }
+  #view-nudge .right { grid-column: 3; grid-row: 2; }
+  #view-nudge .down  { grid-column: 2; grid-row: 3; }
+
   /* Always-on wave tag — small label on the upper-right corner so the
      player can see the current wave number and seconds-left at a glance. */
   #wave-tag {
@@ -925,6 +962,13 @@
       <div class="stats" id="se-stats"></div>
       <button id="se-restart" type="button">Повторить успех</button>
     </div>
+  </div>
+
+  <div id="view-nudge">
+    <button type="button" class="vn up"    data-dir="up"   >▲</button>
+    <button type="button" class="vn left"  data-dir="left" >◀</button>
+    <button type="button" class="vn right" data-dir="right">▶</button>
+    <button type="button" class="vn down"  data-dir="down" >▼</button>
   </div>
 
   <div id="bonus-bar"></div>
@@ -2261,6 +2305,7 @@ function isHudTarget(t) {
                t.closest('#start') || t.closest('#bonus-bar') ||
                t.closest('#sub-picker') || t.closest('#ammo') ||
                t.closest('#session-end') || t.closest('#promille-meter') ||
+               t.closest('#view-nudge') ||
                t.tagName === 'BUTTON');
 }
 window.addEventListener('mousedown', e => {
@@ -2298,7 +2343,57 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
   if (e.code === 'KeyR') { respawnApple(); }
   if (e.code === 'KeyF') { reloadBolts(); }
+  const nd = _arrowDir(e.code);
+  if (nd) { _heldNudge.add(nd); e.preventDefault(); }
 });
+window.addEventListener('keyup', e => {
+  const nd = _arrowDir(e.code);
+  if (nd) _heldNudge.delete(nd);
+});
+
+// Manual view nudge — four directional pushes that bypass the aim clamp,
+// so the player can pull the camera back into view after a runaway hiccup
+// (or push past the normal bounds on purpose). Persists until cancelled
+// in the opposite direction.
+const _viewNudge = { x: 0, y: 0 };
+const _heldNudge = new Set();
+function _arrowDir(code) {
+  if (code === 'ArrowLeft')  return 'left';
+  if (code === 'ArrowRight') return 'right';
+  if (code === 'ArrowUp')    return 'up';
+  if (code === 'ArrowDown')  return 'down';
+  return null;
+}
+function _bindNudgeButton(btn) {
+  const dir = btn.dataset.dir;
+  const press = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _heldNudge.add(dir);
+  };
+  const release = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _heldNudge.delete(dir);
+  };
+  btn.addEventListener('mousedown',  press);
+  btn.addEventListener('touchstart', press, { passive: false });
+  btn.addEventListener('mouseup',    release);
+  btn.addEventListener('mouseleave', release);
+  btn.addEventListener('touchend',   release);
+  btn.addEventListener('touchcancel', release);
+}
+document.querySelectorAll('#view-nudge .vn').forEach(_bindNudgeButton);
+window.addEventListener('blur', () => { _heldNudge.clear(); });
+function tickViewNudge(realDt) {
+  if (_heldNudge.size === 0) return;
+  // Yaw is inverted just like aim: left looks left (positive yaw).
+  const rate = 1.6;  // rad/s while a button is held
+  if (_heldNudge.has('left'))  _viewNudge.x += rate * realDt;
+  if (_heldNudge.has('right')) _viewNudge.x -= rate * realDt;
+  if (_heldNudge.has('up'))    _viewNudge.y += rate * realDt;
+  if (_heldNudge.has('down'))  _viewNudge.y -= rate * realDt;
+}
 
 // Touch input — drag anywhere on the canvas to move the reticle (same
 // absolute mapping as the mouse). The fire and respawn buttons are
@@ -3573,6 +3668,8 @@ function restartSession() {
   state.promille = 0;
   state.wave.hiccupX = 0; state.wave.hiccupY = 0;
   state.wave.hiccupVelX = 0; state.wave.hiccupVelY = 0;
+  _viewNudge.x = 0; _viewNudge.y = 0;
+  _heldNudge.clear();
   state.wave.tunnel = 0;
   document.getElementById('tunnel').style.opacity = '0';
   for (const k of Object.keys(state.fx)) {
@@ -3645,6 +3742,7 @@ function tick() {
   const dt = realDt * slow;
   tickFxTimers(realDt);
   tickWave(realDt);
+  tickViewNudge(realDt);
   state.t += dt;
 
   // FPS-style camera aim, with the SIGN CORRECTED so mouse-right = look-right.
@@ -3741,8 +3839,8 @@ function tick() {
   // without an extra clamp — they can momentarily push the view a bit
   // past the box during a lurch, but they don't subtract from the
   // player's aim reach.
-  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX;
-  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY;
+  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX + _viewNudge.x;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY + _viewNudge.y;
 
   // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
   if (state.crossbowKick > 0) {
