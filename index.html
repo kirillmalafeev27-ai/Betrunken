@@ -2765,12 +2765,20 @@ function makeLabelSprite(text) {
 // Sequential label counter — labels persist for each apple's lifetime and
 // don't re-index when apples are shattered. Resets only on full session restart.
 let _nextAppleLabel = 1;
-function attachAppleLabel(entry) {
-  const text = 'Яблоко ' + _nextAppleLabel;
-  _nextAppleLabel++;
+function attachAppleLabel(entry, textOverride) {
+  // textOverride lets wave-3 twins share the original's label so both
+  // copies read identically — the player can't tell them apart by name.
+  let text;
+  if (textOverride) {
+    text = textOverride;
+  } else {
+    text = 'Яблоко ' + _nextAppleLabel;
+    _nextAppleLabel++;
+  }
   const sp = makeLabelSprite(text);
   scene.add(sp);
   entry.label = sp;
+  entry.labelText = text;
   entry.labelPhase = Math.random() * Math.PI * 2;
   positionAppleLabel(entry);
 }
@@ -3505,7 +3513,9 @@ function triggerDoubling() {
       spec: a.spec,
     };
     state.apples.push(twinEntry);
-    attachAppleLabel(twinEntry);
+    // Twin inherits the original's label text — both copies must read
+    // identically so the player can't disambiguate by name.
+    attachAppleLabel(twinEntry, a.labelText || null);
     // Reposition the original's label now that the apple moved.
     positionAppleLabel(a);
 
