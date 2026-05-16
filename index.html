@@ -3639,9 +3639,9 @@ function tick() {
   // Asymmetric yaw: leftward pan is clamped near the right edge of the
   // fireplace (which sits around world x≈-2 from the camera), so the view
   // can't drift off the scene on that side.
-  const AIM_YAW_LEFT  = 0.65;   // max additional yaw when looking left
-  const AIM_YAW_RIGHT = 0.85;   // max additional yaw when looking right
-  const AIM_PITCH = 0.55;   // max pitch
+  const AIM_YAW_LEFT  = 0.78;   // max additional yaw when looking left
+  const AIM_YAW_RIGHT = 1.00;   // max additional yaw when looking right
+  const AIM_PITCH = 0.68;   // max pitch
   const camAimX = state.aim.x >= 0
     ? -state.aim.x * AIM_YAW_RIGHT   // mouse right → yaw < 0 → look right ✓
     : -state.aim.x * AIM_YAW_LEFT;   // mouse left  → yaw > 0 → look left, clamped
@@ -3706,19 +3706,14 @@ function tick() {
   // Hiccup (wave 2+): persistent offset that doesn't decay through the aim
   // spring — adds directly to the final rotation. Hides behind the spring's
   // own noise, but accumulates if the player idles.
-  // Compose final camera rotation, then CLAMP to the same range as the
-  // mouse-driven aim. Hiccup / sway / recoil push the camera around inside
-  // the box, but they can't extend the player's viewable boundary — the max
-  // left/right/up/down a player can see is fixed by AIM_YAW_LEFT/RIGHT and
-  // AIM_PITCH no matter how violent the hiccups get.
-  const yawMin = BASE_YAW - AIM_YAW_RIGHT;
-  const yawMax = BASE_YAW + AIM_YAW_LEFT;
-  const pitchMin = BASE_PITCH - AIM_PITCH;
-  const pitchMax = BASE_PITCH + AIM_PITCH;
-  const rawYaw = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX;
-  const rawPitch = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY;
-  camera.rotation.y = Math.max(yawMin, Math.min(yawMax, rawYaw));
-  camera.rotation.x = Math.max(pitchMin, Math.min(pitchMax, rawPitch));
+  // Compose final camera rotation. The aim component itself is already
+  // clamped to ±AIM_YAW_* / ±AIM_PITCH through camAimX/Y, so the player's
+  // own mouse range stays fixed. Hiccup / sway / recoil are added on top
+  // without an extra clamp — they can momentarily push the view a bit
+  // past the box during a lurch, but they don't subtract from the
+  // player's aim reach.
+  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY;
 
   // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
   if (state.crossbowKick > 0) {
