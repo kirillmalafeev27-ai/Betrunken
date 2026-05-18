@@ -1754,7 +1754,7 @@ const BONUS_CATEGORIES = [
 // At t == N, all sub-quads are fully bright. As t decreases, the RIGHTMOST
 // sub-quad fades first (linearly). When t crosses i, sub-quad at column i
 // becomes fully empty. So opacity for the sub at LEFT-index i = clamp(t - i, 0, 1).
-const TILE_DRAIN_RATE = 0.13;  // sub-quads per second — full tile drains in ~N/0.13 sec
+const TILE_DRAIN_RATE = 1 / 15;  // one sub-quad (ability cycle) drains in 15 sec
 const TILE_MISS_PENALTY = 0.5; // half a sub-quad per miss
 const TILE_HIT_REGEN_FRAC = 0.5; // hit refills to >= 50% of N
 
@@ -4643,17 +4643,16 @@ function shatterApple(idx, impactPoint, impactDir) {
 // Each wave is BREATHER_SEC of intro banner, then ACTIVE_SEC of play with its
 // debuff stack. After wave 7 the session ends and the recap overlay opens.
 // ---------------------------------------------------------------------------
-const WAVE_DEFAULT_ACTIVE_SEC = 45;
+const WAVE_DEFAULT_ACTIVE_SEC = 90;
 const WAVE_BREATHER_SEC = 3;
 const WAVE_CONFIG = [
-  // Wave 1 is intentionally short so the player meets wave-2 debuffs quickly.
-  { num: 1, title: 'ВОЛНА I',   sub: 'Разминка. Стреляй спокойно.',                          duration: 15, debuffs: [] },
+  { num: 1, title: 'ВОЛНА I',   sub: 'Разминка. Стреляй спокойно.',                          debuffs: [] },
   { num: 2, title: 'ВОЛНА II',  sub: 'Икота и туннельное зрение, особенно при бездействии.', debuffs: ['hiccup', 'tunnel'] },
   { num: 3, title: 'ВОЛНА III', sub: 'Двойники яблок — выбери настоящее.',                   debuffs: ['double'] },
   { num: 4, title: 'ВОЛНА IV',  sub: 'Усыхание, маятник и щит-яблоки.',                      debuffs: ['shrink', 'pendulum', 'shield'] },
   { num: 5, title: 'ВОЛНА V',   sub: 'Икота + маятник + щиты.',                              debuffs: ['hiccup', 'tunnel', 'shrink', 'pendulum', 'shield'] },
   { num: 6, title: 'ВОЛНА VI',  sub: 'Полный мрак — всё сразу.',                             debuffs: ['hiccup', 'tunnel', 'double', 'shrink', 'pendulum', 'shield'] },
-  { num: 7, title: 'ФИНАЛ',     sub: 'Лёгкий бой. Добивай и закрывай сессию.',               duration: 25, debuffs: [] },
+  { num: 7, title: 'ФИНАЛ',     sub: 'Лёгкий бой. Добивай и закрывай сессию.',               debuffs: [] },
 ];
 function waveDuration(num) {
   const cfg = WAVE_CONFIG[num - 1];
