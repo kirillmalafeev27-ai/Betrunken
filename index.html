@@ -1389,6 +1389,8 @@ const state = {
     leuchtspurSh: 0,
     vorahnungSh: 0,
     vorahnungQueue: [],    // pre-rolled upcoming hiccups for the preview
+    kocherShots: 0,        // free-shot counter (Köcher)
+    glueckShots: 0,        // free-miss-promille counter (Glückschuss)
     zinsenPending: false,  // first Zinsen pick done — awaiting second tile click
     geistSh: 0,
     doppelSh: 0,
@@ -1508,19 +1510,19 @@ function showScorePop(points, zone) {
 // matches the position notation in the design doc.
 const BONUS_CATEGORIES = [
   { id: 'breath', title: 'Дыхание', subs: [
-      { id: 'zeitlupe', pos: 3, name: 'Zeitlupe',      desc: '×0.3 мир на 2 сек (ПКМ)' },
+      { id: 'zeitlupe', pos: 3, name: 'Zeitlupe',      desc: 'мир ×0.5 на 15 сек' },
       { id: 'anker',    pos: 2, name: 'Anker',         desc: 'шатание только по одной оси на 1 выстрел' },
-      { id: 'atem',     pos: 1, name: 'Atem anhalten', desc: '−50% опьянения/дрейфа на 4 сек (нужна серия 2+)', requiresStreak: 2 },
+      { id: 'atem',     pos: 1, name: 'Atem anhalten', desc: '−50% опьянения и дрейфа на 15 сек' },
   ]},
   { id: 'aim', title: 'Прицел', subs: [
       { id: 'leuchtspur', pos: 4, name: 'Leuchtspur', desc: 'до конца волны: трасса болта пунктиром' },
       { id: 'zoom',       pos: 3, name: 'Zoom',       desc: 'до конца волны: приближение, выше точность' },
-      { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'до конца волны: болт чуть магнитится к цели' },
-      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'все яблоки ×1.5 на 3 секунды' },
+      { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'до конца волны: болт магнитится к близкому яблоку в полёте' },
+      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'все яблоки ×1.5 на 8 секунд' },
   ]},
   { id: 'res', title: 'Ресурсы', subs: [
-      { id: 'schnaps', pos: 3, name: 'Schnaps', desc: '+болты, шатание ×N на 5 сек' },
-      { id: 'kocher',  pos: 2, name: 'Köcher +2', desc: 'два болта в запас' },
+      { id: 'schnaps', pos: 3, name: 'Schnaps', desc: '+опьянение, но возвращает камеру к точке прицела' },
+      { id: 'kocher',  pos: 2, name: 'Köcher',   desc: 'следующие 2 выстрела не тратят болты' },
       { id: 'zinsen',  pos: 1, name: 'Zinsen',  desc: 'следующее попадание — двойной выбор' },
   ]},
   { id: 'def', title: 'Защита', subs: [
@@ -1529,7 +1531,7 @@ const BONUS_CATEGORIES = [
       { id: 'kaffee', pos: 1, name: 'Kaffee', desc: 'сбрасывает все debuff' },
   ]},
   { id: 'info', title: 'Чтение', subs: [
-      { id: 'rhythmus',  pos: 4, name: 'Rhythmus',    desc: 'метроном, синхронный с шатанием' },
+      { id: 'rhythmus',  pos: 4, name: 'Glückschuss', desc: 'следующие 2 промаха не наказывают опьянением' },
       { id: 'geist',     pos: 3, name: 'Точка',        desc: 'яркая точка в центре экрана для точного прицела' },
       { id: 'doppel',    pos: 2, name: 'Doppelschuss', desc: 'один выстрел = два болта с разлётом, больше шанс попасть' },
       { id: 'vorahnung', pos: 1, name: 'Vorahnung',    desc: 'видны все предстоящие толчки камеры вплоть до выстрела' },
@@ -1702,10 +1704,11 @@ function subLiveOpacity(tile, idx) {
   return Math.max(0, Math.min(1, tile.t - idx));
 }
 function isSubBuyable(tile, sub, idx) {
-  // Money is the universal gate; streak-requirement still blocks where set
-  // (Atem anhalten). Timer state is purely cosmetic now.
+  // Time availability is the only hard gate now — if the sub-quad has
+  // drained below the live threshold, it can't be picked. Streak
+  // requirement still blocks where set. Money is no longer required.
   if (sub.requiresStreak && state.streak < sub.requiresStreak) return false;
-  if (state.euros < priceForSub(sub)) return false;
+  if (subLiveOpacity(tile, idx) < 0.4) return false;
   return true;
 }
 function availableSubs(tile) {
@@ -1745,8 +1748,8 @@ function renderSubPicker() {
     const price = priceForSub(sub);
     const live = subLiveOpacity(tile, i) >= 0.4;
     const streakOk = !sub.requiresStreak || state.streak >= sub.requiresStreak;
-    const canAfford = state.euros >= price;
-    const buyable = streakOk && canAfford;
+    // Money is no longer required — only time (live) and streak gate.
+    const buyable = streakOk && live;
     const b = document.createElement('button');
     b.className = 'opt';
     if (!live) b.classList.add('expired');
@@ -1765,9 +1768,11 @@ function renderSubPicker() {
     if (buyable) {
       b.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation();
-        // Re-validate at click time (state may have changed since render).
-        if (state.euros < price) return;
+        // Re-validate live + streak at click time (state may have changed).
         if (sub.requiresStreak && state.streak < sub.requiresStreak) return;
+        if (subLiveOpacity(tile, i) < 0.4) return;
+        // Money is no longer a gate — euros are still deducted (they can go
+        // negative; that's just a "score" of how much was spent).
         state.euros -= price;
         updateStats();
         state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t, paid: price });
@@ -1805,7 +1810,9 @@ function applySubEffect(subId) {
   const fx = state.fx;
   switch (subId) {
     case 'zeitlupe':
-      if (IS_TOUCH) fx.zeitlupe = 2.0; else fx.zeitlupeReady = true;
+      // 15 s of 0.5× slow-motion. Fires immediately on claim — no RMB hold.
+      fx.zeitlupe = 15.0;
+      fx.zeitlupeReady = false;
       break;
     case 'anker':
       // Treated as a 4 s window the player can fire within; suppresses
@@ -1814,13 +1821,13 @@ function applySubEffect(subId) {
       if (Math.random() < 0.5) { fx.ankerLockH = true; fx.ankerLockV = false; }
       else                    { fx.ankerLockV = true; fx.ankerLockH = false; }
       break;
-    case 'atem':    fx.atem = 4.0; break;
+    case 'atem':    fx.atem = 15.0; break;
     case 'adlerauge':
-      // All apples get ×1.5 for 3 seconds. Visual scale + hitbox bump are
+      // All apples get ×1.5 for 8 seconds. Visual scale + hitbox bump are
       // applied immediately and reverted when the timer expires in
       // tickFxTimers.
       if (fx.adlerSec <= 0) setAdlerVisual(true);
-      fx.adlerSec = 3.0;
+      fx.adlerSec = 8.0;
       break;
     // Aim-category effects (except Adlerauge) now last until the wave
     // changes — the value 1 here is just a flag, not a counter. Cleared
@@ -1829,13 +1836,19 @@ function applySubEffect(subId) {
     case 'zoom':       fx.zoomSh = 1; break;
     case 'leuchtspur': fx.leuchtspurSh = 1; break;
     case 'kocher':
-      state.boltsLeft = Math.min(4, state.boltsLeft + 2);
-      updateAmmo();
+      // Two free shots — fx.kocherShots is decremented per shot inside
+      // tryShoot, and while > 0 the bolt isn't consumed from the quiver.
+      fx.kocherShots = 2;
       break;
     case 'zinsen': fx.zinsen = true; break;
     case 'schnaps':
-      state.boltsLeft = 4; updateAmmo();
+      // Bumps drunkenness AND returns the camera to the aim point by
+      // wiping the accumulated hiccup displacement / velocity. Risky
+      // trade: stronger jitter for a frame-perfect reset of the view.
       fx.schnaps = 5.0;
+      state.wave.hiccupX = 0; state.wave.hiccupY = 0;
+      state.wave.hiccupVelX = 0; state.wave.hiccupVelY = 0;
+      _viewNudge.x = 0; _viewNudge.y = 0;
       break;
     case 'kaffee':
       // Wipe accumulated wave debuffs in one go: hiccup offset, tunnel
@@ -1870,7 +1883,12 @@ function applySubEffect(subId) {
       fx.nextKickY = (Math.random() - 0.5) * 0.3 * state.recoilStrength;
       rollVorahnungQueue();
       break;
-    case 'rhythmus': fx.rhythmusSec = 6.0; break;
+    case 'rhythmus':
+      // Glückschuss: next 2 misses cost no promille.
+      fx.glueckShots = 2;
+      // Old metronome bar isn't shown anymore — keep rhythmusSec 0.
+      fx.rhythmusSec = 0;
+      break;
     case 'geist':    fx.geistSh = 1; break;
     case 'doppel':
       // Single trigger that fires a SPREAD shot (two bolts at once).
@@ -2039,6 +2057,7 @@ function updateActiveFxIfChanged() {
     fx.zoomSh.toFixed(1), fx.leuchtspurSh,
     fx.vorahnungSh, (fx.vorahnungQueue || []).length, fx.geistSh, fx.doppelSh,
     fx.zeitlupeReady ? 1 : 0, fx.zinsen ? 1 : 0, fx.zinsenPending ? 1 : 0, fx.schild,
+    fx.kocherShots, fx.glueckShots,
   ].join('|');
   if (sig === _lastFxSig) return;
   _lastFxSig = sig;
@@ -2050,19 +2069,19 @@ function updateActiveFx() {
   el.innerHTML = '';
   const fx = state.fx;
   const items = [];
-  if (fx.zeitlupeReady)   items.push('Zeitlupe готов (ПКМ)');
-  if (fx.zeitlupe > 0)    items.push('Zeitlupe ' + fx.zeitlupe.toFixed(1) + 'с');
+  if (fx.zeitlupe > 0)    items.push('Zeitlupe ×0.5 ' + fx.zeitlupe.toFixed(1) + 'с');
   if (fx.atem > 0)        items.push('Atem ' + fx.atem.toFixed(1) + 'с');
   if (fx.schnaps > 0)     items.push('Schnaps ' + fx.schnaps.toFixed(1) + 'с');
   if (fx.geduld > 0)      items.push('Geduld (волна)');
-  if (fx.rhythmusSec > 0) items.push('Rhythmus ' + fx.rhythmusSec.toFixed(0) + 'с');
+  if (fx.glueckShots > 0) items.push('Glückschuss ×' + fx.glueckShots);
+  if (fx.kocherShots > 0) items.push('Köcher ×' + fx.kocherShots);
   if (fx.ankerSh > 0)     items.push('Anker ' + (fx.ankerLockH ? 'H' : 'V') + ' ' + fx.ankerSh.toFixed(1) + 'с');
   if (fx.adlerSec > 0)    items.push('Adlerauge ×1.5 ' + fx.adlerSec.toFixed(1) + 'с');
   if (fx.magnetSh > 0)    items.push('Magnet (волна)');
   if (fx.zoomSh > 0)      items.push('Zoom (волна)');
   if (fx.leuchtspurSh > 0) items.push('Leuchtspur (волна)');
   if (fx.vorahnungSh > 0) items.push('Vorahnung');
-  if (fx.geistSh > 0)     items.push('Geist-Pfeil');
+  if (fx.geistSh > 0)     items.push('Точка');
   if (fx.doppelSh > 0)    items.push('Doppelschuss (2 болта)');
   if (fx.zinsen)          items.push('Zinsen (доп. выбор)');
   if (fx.zinsenPending)   items.push('Zinsen — выбери ещё бонус');
@@ -2781,6 +2800,12 @@ function makeAppleMesh(size, opts = {}) {
       o.castShadow = !opts.ghost;
       o.receiveShadow = !opts.ghost;
       o.material = o.material.clone();
+      // Always-on-top rendering: if an apple drifts behind a wall (pendulum,
+      // doubling offset, etc.) the player still sees it. The bolt hit-test
+      // already ignores world geometry, so this also makes "shoot through
+      // the wall" possible.
+      o.material.depthTest = false;
+      o.renderOrder = 800;
       if (opts.ghost) {
         o.material.transparent = true;
         o.material.opacity = 0.35;
@@ -3107,8 +3132,12 @@ function tryShoot() {
   if (se && se.classList.contains('on')) return;
   // No shot without an armed bonus — flash the reminder and bail.
   if (!state.selectedTileId) { flashPickReminder(); return; }
-  if (state.boltsLeft <= 0) { AudioFx.miss(); return; }
-  state.boltsLeft--;
+  // Köcher: while > 0, this shot doesn't cost a bolt. Decrement the counter
+  // instead. If no quiver and no free shots, just bail with the miss SFX.
+  const kocherFree = state.fx.kocherShots > 0;
+  if (!kocherFree && state.boltsLeft <= 0) { AudioFx.miss(); return; }
+  if (kocherFree) state.fx.kocherShots--;
+  else            state.boltsLeft--;
   state.lastShotTime = state.t;
   updateAmmo();
   // Doppelschuss: while doppelSh > 0, skip the firing-rate gate.
@@ -3745,7 +3774,7 @@ function tick() {
 
   // Zeitlupe: while active, game logic ticks at 30 % speed. Effect timers
   // and DOM/UI events still use real time.
-  const slow = state.fx.zeitlupe > 0 ? 0.3 : 1.0;
+  const slow = state.fx.zeitlupe > 0 ? 0.5 : 1.0;
   const dt = realDt * slow;
   tickFxTimers(realDt);
   tickWave(realDt);
@@ -3865,6 +3894,45 @@ function tick() {
 
   // Update bolts
   for (const b of state.bolts) {
+    // Magnet in-flight steering: while the magnet effect is active and this
+    // bolt hasn't resolved, look for the closest (real) apple inside a
+    // generous radius and bend the bolt's direction toward its centre.
+    // If the new trajectory now intersects the apple, promote the bolt to
+    // willHit and recompute its hit point + score zone.
+    if (state.fx.magnetSh > 0 && !b.resolved) {
+      let best = null, bestD = 1.6;   // metres of attraction range
+      for (const a of state.apples) {
+        if (a.isGhost) continue;
+        const d = b.pos.distanceTo(a.hitbox.center);
+        if (d < bestD) { bestD = d; best = a; }
+      }
+      if (best) {
+        const toA = best.hitbox.center.clone().sub(b.pos).normalize();
+        // Stronger pull when closer (1 - d/range squared).
+        const norm = Math.max(0, 1 - bestD / 1.6);
+        const k = Math.min(1, 4.0 * norm * dt);
+        b.dir = b.dir.lerp(toA, k).normalize();
+        b.obj.lookAt(b.pos.clone().add(b.dir));
+        // Re-check intersection with this apple along the new dir.
+        const oc = b.pos.clone().sub(best.hitbox.center);
+        const bb = oc.dot(b.dir);
+        const cc = oc.dot(oc) - best.hitbox.radius * best.hitbox.radius;
+        const disc = bb * bb - cc;
+        if (disc >= 0) {
+          const tHit = -bb - Math.sqrt(disc);
+          if (tHit > 0 && tHit < bestD + 0.5) {
+            b.willHit = true;
+            b.hitPoint = b.pos.clone().add(b.dir.clone().multiplyScalar(tHit));
+            b.hitAppleIdx = state.apples.indexOf(best);
+            const perpDist = Math.sqrt(Math.max(0, oc.dot(oc) - bb * bb));
+            const r = perpDist / best.hitbox.radius;
+            if (r < 0.33)      { b.hitZone = 'center'; b.hitPoints = 10; }
+            else if (r < 0.66) { b.hitZone = 'mid';    b.hitPoints = 5;  }
+            else               { b.hitZone = 'outer';  b.hitPoints = 2;  }
+          }
+        }
+      }
+    }
     const step = b.dir.clone().multiplyScalar(b.speed * dt);
     const next = b.pos.clone().add(step);
     // Resolve hit if we cross the hit point.
@@ -3907,7 +3975,17 @@ function tick() {
             bumpPromilleHit(b.hitZone);
             if (state.streak >= 2) showStreakPop(state.streak);
             if (state.selectedTileId) {
-              openSubPicker(state.selectedTileId);
+              // Open the picker a beat AFTER the hit so the shatter +
+              // score pop have time to read before the modal interrupts.
+              const armedTile = state.selectedTileId;
+              setTimeout(() => {
+                // Re-check at fire time — the player may have already
+                // disarmed or another picker opened during the wait.
+                if (state.selectedTileId !== armedTile) return;
+                const sp = document.getElementById('sub-picker');
+                if (sp && sp.classList.contains('on')) return;
+                openSubPicker(armedTile);
+              }, 1000);
             }
             // If this apple was part of a wave-3 pair, also remove its twin.
             if (apple.pairId) {
@@ -3939,7 +4017,9 @@ function tick() {
         b.missPlayed = true;
         state.streak = 0;
         onBonusMiss();
-        bumpPromilleMiss();
+        // Glückschuss soaks up to two miss-promille penalties.
+        if (state.fx.glueckShots > 0) state.fx.glueckShots--;
+        else                          bumpPromilleMiss();
       }
     }
   }
