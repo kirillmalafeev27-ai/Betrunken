@@ -46,10 +46,11 @@
 
   #controls {
     position: absolute; bottom: 14px; left: 14px; right: 14px;
-    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+    display: none; gap: 10px; justify-content: center; flex-wrap: wrap;
     pointer-events: none;
     z-index: 5;
   }
+  body.sandbox #controls { display: flex; }
   .ctl {
     background: rgba(20,18,16,0.72);
     backdrop-filter: blur(6px);
@@ -1418,6 +1419,12 @@ const IS_TOUCH = (typeof window !== 'undefined') &&
   (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
 const IS_SMALL = Math.min(window.innerWidth, window.innerHeight) < 820;
 const IS_MOBILE = IS_TOUCH && IS_SMALL;
+// Sandbox mode — /sandbox URL exposes the dev sliders + reset / respawn /
+// spawn-editor buttons. The default route serves the same SPA but keeps the
+// debug panel hidden.
+if (location.pathname === '/sandbox' || location.pathname.startsWith('/sandbox/')) {
+  document.body.classList.add('sandbox');
+}
 if (IS_TOUCH) {
   document.body.classList.add('touch');
   const kd = document.getElementById('keys-desktop');
