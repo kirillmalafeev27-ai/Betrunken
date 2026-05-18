@@ -3500,20 +3500,14 @@ window.addEventListener('mousedown', e => {
   markInput();
   if (document.getElementById('start').style.display !== 'none') return;
   if (isHudTarget(e.target)) return;
-  // Pointer may not be locked: either the player pressed Escape, or the
-  // initial lock request didn't go through. Always sync the virtual
-  // cursor to the click position and try to re-lock so the cursor can't
-  // drift outside the window. If the player explicitly opened the cursor
-  // (body.cursor-on), absorb the click as a "resume play" gesture; if
-  // the lock simply failed at boot, allow the click to also fire.
+  // If the cursor is currently visible (Escape was pressed, or pointer
+  // lock never engaged), the click should hide it again and absorb itself
+  // as a "resume play" gesture — no shot is fired on that first click.
   if (!document.pointerLockElement) {
     _vCursor.x = e.clientX; _vCursor.y = e.clientY;
     _applyAimFromVCursor();
-    const explicitlyOpened = document.body.classList.contains('cursor-on');
-    if (!explicitlyOpened) {
-      document.body.classList.remove('cursor-on');
-      lockPointer();
-    }
+    hideCursor();
+    return;
   }
   tryShoot();
 });
