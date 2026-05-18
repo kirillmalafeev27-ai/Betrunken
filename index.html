@@ -2396,13 +2396,9 @@ function tickViewNudge(realDt) {
     if (_heldNudge.has('up'))    _viewNudge.y += rate * realDt;
     if (_heldNudge.has('down'))  _viewNudge.y -= rate * realDt;
   }
-  // Auto-counter: each frame match exactly the negative hiccup offset.
-  // hiccup + autoCounter == 0, so the lurch is cancelled INSTANTLY —
-  // no visible push and no return animation. Manual _viewNudge is
-  // untouched, so the player can still push the camera around with
-  // the arrows on purpose.
-  _autoCounter.x = -state.wave.hiccupX;
-  _autoCounter.y = -state.wave.hiccupY;
+  // No automatic counter — the hiccup lurch stays visible and the
+  // camera doesn't get pulled back. Manual _viewNudge arrows are the
+  // only thing that moves the camera here.
 }
 
 // Touch input — drag anywhere on the canvas to move the reticle (same
@@ -3850,8 +3846,8 @@ function tick() {
   // without an extra clamp — they can momentarily push the view a bit
   // past the box during a lurch, but they don't subtract from the
   // player's aim reach.
-  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX + _autoCounter.x + _viewNudge.x;
-  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY + _autoCounter.y + _viewNudge.y;
+  camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX + _viewNudge.x;
+  camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY + _viewNudge.y;
 
   // Manual recoil shake on the crossbow rig (replaces the broken built-in animation).
   if (state.crossbowKick > 0) {
