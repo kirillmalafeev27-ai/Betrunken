@@ -233,9 +233,9 @@
      an armed bonus tile. Fades out on its own. */
   #pick-reminder {
     position: absolute;
-    top: 58%;
+    top: calc(50% + 72px);
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.85);
+    transform: translate(-50%, 0) scale(0.85);
     padding: 11px 22px;
     background: rgba(20,18,16,0.92);
     border: 1px solid rgba(200,144,96,0.55);
@@ -253,14 +253,14 @@
   }
   #pick-reminder.on {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, 0) scale(1);
     box-shadow: 0 0 24px 2px rgba(200,144,96,0.55);
   }
   #question-banner {
     position: absolute;
-    top: 48%;
+    top: calc(50% + 72px);
     left: 50%;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, 0);
     width: min(720px, calc(100vw - 28px));
     padding: 14px 20px;
     background: rgba(20,18,16,0.92);
@@ -276,7 +276,7 @@
   }
   #question-banner.on {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, 0) scale(1);
     box-shadow: 0 0 24px 2px rgba(200,144,96,0.38);
   }
   #question-banner .qb-topic {
@@ -2832,11 +2832,13 @@ function subLiveOpacity(tile, idx) {
   return Math.max(0, Math.min(1, tile.t - idx));
 }
 function isSubBuyable(tile, sub, idx) {
-  // Time availability is the only hard gate now — if the sub-quad has
-  // drained below the live threshold, it can't be picked. Streak
-  // requirement still blocks where set. Money is no longer required.
+  // Two parallel gates: time (timer plaque still live) OR money (enough
+  // euros to cover the price). Either one grants access; streak still
+  // hard-gates where set.
   if (sub.requiresStreak && state.streak < sub.requiresStreak) return false;
-  if (subLiveOpacity(tile, idx) < 0.4) return false;
+  const live = subLiveOpacity(tile, idx) >= 0.4;
+  const canAfford = state.euros >= priceForSub(sub);
+  if (!live && !canAfford) return false;
   return true;
 }
 function availableSubs(tile) {
@@ -2875,16 +2877,17 @@ function renderSubPicker() {
     const sub = tile.subs[i];
     const price = priceForSub(sub);
     const live = subLiveOpacity(tile, i) >= 0.4;
+    const canAfford = state.euros >= price;
     const streakOk = !sub.requiresStreak || state.streak >= sub.requiresStreak;
-    // Money is no longer required — only time (live) and streak gate.
-    const buyable = streakOk && live;
+    // Time OR money grants entry — either gate keeps access alive.
+    const buyable = streakOk && (live || canAfford);
     const b = document.createElement('button');
     b.className = 'opt';
     if (!live) b.classList.add('expired');
     if (!buyable) b.classList.add('disabled');
     b.type = 'button';
     const tagBits = [];
-    tagBits.push(live ? 'В НАЛИЧИИ' : 'ИСТЁК');
+    tagBits.push(live ? 'В НАЛИЧИИ' : (canAfford ? 'ПО ЕВРО' : 'ИСТЁК'));
     if (sub.requiresStreak) tagBits.push('СЕРИЯ ≥ ' + sub.requiresStreak);
     b.innerHTML =
       '<div class="row">' +
@@ -2896,11 +2899,13 @@ function renderSubPicker() {
     if (buyable) {
       b.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation();
-        // Re-validate live + streak at click time (state may have changed).
+        // Re-validate gates at click time (state may have changed).
         if (sub.requiresStreak && state.streak < sub.requiresStreak) return;
-        if (subLiveOpacity(tile, i) < 0.4) return;
-        // Money is no longer a gate — euros are still deducted (they can go
-        // negative; that's just a "score" of how much was spent).
+        const stillLive = subLiveOpacity(tile, i) >= 0.4;
+        const stillAfford = state.euros >= price;
+        if (!stillLive && !stillAfford) return;
+        // Euros are always deducted (can go negative when only the time
+        // gate covered the purchase — that's just a spend tally).
         state.euros -= price;
         updateStats();
         state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t, paid: price });
@@ -3986,19 +3991,20 @@ function appleVariantForWave() {
 // at the camera and DEPTH-TESTed so closer apples occlude their own label
 // correctly while not vanishing behind the apple mesh.
 function makeLabelSprite(text) {
-  const W = 420, H = 150;
+  // Render at 2x resolution for crisp text, then downsample via sprite scale.
+  const W = 840, H = 300;
   const cnv = document.createElement('canvas');
   cnv.width = W; cnv.height = H;
   const ctx = cnv.getContext('2d');
   const raw = String(text || '');
-  const fontSize = raw.length > 54 ? 22 : raw.length > 34 ? 27 : raw.length > 20 ? 32 : 42;
+  const fontSize = raw.length > 54 ? 56 : raw.length > 34 ? 68 : raw.length > 20 ? 82 : 104;
   const words = raw.split(/\s+/).filter(Boolean);
   const lines = [];
   let line = '';
   ctx.font = 'bold ' + fontSize + 'px "Impact", "Arial Black", system-ui, sans-serif';
   for (const word of words) {
     const test = line ? line + ' ' + word : word;
-    if (ctx.measureText(test).width > W - 42 && line) {
+    if (ctx.measureText(test).width > W - 84 && line) {
       lines.push(line);
       line = word;
     } else {
@@ -4014,19 +4020,19 @@ function makeLabelSprite(text) {
   ctx.font = 'bold ' + fontSize + 'px "Impact", "Arial Black", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = Math.max(5, fontSize * 0.18);
+  ctx.lineWidth = Math.max(10, fontSize * 0.2);
   ctx.lineJoin = 'round';
   ctx.miterLimit = 2;
-  ctx.strokeStyle = 'rgba(20, 12, 4, 0.95)';
+  ctx.strokeStyle = 'rgba(20, 12, 4, 1)';
   const lineHeight = fontSize * 1.1;
   const startY = -((finalLines.length - 1) * lineHeight) / 2;
   for (let i = 0; i < finalLines.length; i++) {
     ctx.strokeText(finalLines[i], 0, startY + i * lineHeight);
   }
   // Vertical gradient gives a cartoony "shine".
-  const grad = ctx.createLinearGradient(0, -42, 0, 42);
-  grad.addColorStop(0, '#fff4c2');
-  grad.addColorStop(1, '#ffb04a');
+  const grad = ctx.createLinearGradient(0, -fontSize, 0, fontSize);
+  grad.addColorStop(0, '#fff7d0');
+  grad.addColorStop(1, '#ffae3a');
   ctx.fillStyle = grad;
   for (let i = 0; i < finalLines.length; i++) {
     ctx.fillText(finalLines[i], 0, startY + i * lineHeight);
@@ -4035,17 +4041,19 @@ function makeLabelSprite(text) {
 
   const tex = new THREE.CanvasTexture(cnv);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  tex.minFilter = THREE.LinearFilter;
+  tex.anisotropy = 16;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
   const mat = new THREE.SpriteMaterial({
     map: tex,
     transparent: true,
-    opacity: 0.62,
+    opacity: 0.92,
     depthWrite: false,
     depthTest: false,    // always draw on top of scene geometry — no clipping behind walls
   });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(1.45, 0.52, 1);
+  sprite.scale.set(1.9, 0.68, 1);
   // renderOrder pushes the sprite to the very end of the queue, so even with
   // depthTest off it composites cleanly above everything else.
   sprite.renderOrder = 999;
