@@ -2586,7 +2586,7 @@ function initLearningMenu() {
       configureQuestionBank();
       AudioFx.ensure();
       document.getElementById('start').style.display = 'none';
-      document.body.classList.add('cursor-on');
+      hideCursor();
       updateQuestionBanner();
     });
   }
@@ -3452,6 +3452,18 @@ function unlockPointer() {
     document.exitPointerLock();
   }
 }
+// Cursor visibility helpers — hide while playing (the crosshair takes over),
+// show again on Escape so menus, the sub-picker and Zinsen prompts can be
+// clicked. Pointer lock is the strongest hide (also captures movement); the
+// body.cursor-on class is the soft fallback when lock can't be acquired.
+function hideCursor() {
+  document.body.classList.remove('cursor-on');
+  lockPointer();
+}
+function showCursor() {
+  document.body.classList.add('cursor-on');
+  unlockPointer();
+}
 document.addEventListener('pointerlockchange', () => {
   // Treat the browser-managed lock state as the source of truth for
   // body.cursor-on: hidden during lock, visible otherwise.
@@ -3500,11 +3512,10 @@ window.addEventListener('mousedown', e => {
 });
 window.addEventListener('keydown', e => {
   if (e.code === 'Escape') {
-    // The browser auto-exits pointer lock on Esc — our pointerlockchange
-    // handler then sets body.cursor-on. We just make sure the cursor is
-    // visible immediately even before the change event lands.
-    document.body.classList.add('cursor-on');
-    unlockPointer();
+    // Force the cursor back immediately — pointerlockchange will also fire,
+    // but showCursor() does both the body-class flip and the lock exit so
+    // the cursor reappears even if the lock wasn't actually engaged.
+    showCursor();
     return;
   }
   if (document.getElementById('start').style.display !== 'none') return;
