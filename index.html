@@ -2396,17 +2396,13 @@ function tickViewNudge(realDt) {
     if (_heldNudge.has('up'))    _viewNudge.y += rate * realDt;
     if (_heldNudge.has('down'))  _viewNudge.y -= rate * realDt;
   }
-  // Auto-counter: smoothly drag the camera back to where the player is
-  // aiming after a hiccup. The target is -hiccupX/-hiccupY so the sum
-  // hiccup + autoCounter settles to zero. Because the counter is a low-
-  // pass follower (~3 /s), the initial lurch is still visible — the
-  // counter just lags long enough to read the hiccup, then pulls the
-  // view back over ~1 s. Does NOT touch the manual _viewNudge.
-  const tgtX = -state.wave.hiccupX;
-  const tgtY = -state.wave.hiccupY;
-  const k = Math.min(1, 3.0 * realDt);
-  _autoCounter.x += (tgtX - _autoCounter.x) * k;
-  _autoCounter.y += (tgtY - _autoCounter.y) * k;
+  // Auto-counter: each frame match exactly the negative hiccup offset.
+  // hiccup + autoCounter == 0, so the lurch is cancelled INSTANTLY —
+  // no visible push and no return animation. Manual _viewNudge is
+  // untouched, so the player can still push the camera around with
+  // the arrows on purpose.
+  _autoCounter.x = -state.wave.hiccupX;
+  _autoCounter.y = -state.wave.hiccupY;
 }
 
 // Touch input — drag anywhere on the canvas to move the reticle (same
