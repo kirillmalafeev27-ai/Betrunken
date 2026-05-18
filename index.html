@@ -4987,7 +4987,11 @@ const clock = new THREE.Clock();
 function tick() {
   const realDt = Math.min(0.05, clock.getDelta());
   const startEl = document.getElementById('start');
-  const frozen = startEl && startEl.style.display !== 'none';
+  const startVisible = startEl && startEl.style.display !== 'none';
+  // Also freeze the world while a question is being generated — wave timer,
+  // bonus drain, fx timers and physics all pause until the quiz arrives.
+  const generating = state.learning && state.learning.loading;
+  const frozen = startVisible || generating;
 
   if (frozen) {
     // Lock the camera to its base pose so the crossbow doesn't sway on the
