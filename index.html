@@ -1590,6 +1590,7 @@ const state = {
     loading: false,
     questionsAnswered: 0,
     questionsCorrect: 0,
+    wrongAnswers: 0,   // session-wide wrong answers — feeds the drunk-cap penalty
   },
   // Active sub-bonus effects. Timed effects tick down in REAL seconds;
   // per-shot counters decrement when consumed by tryShoot.
@@ -3414,8 +3415,10 @@ function _applyAimFromVCursor() {
 }
 window.addEventListener('mousemove', e => {
   if (document.pointerLockElement) {
-    _vCursor.x = Math.max(0, Math.min(window.innerWidth - 1, _vCursor.x + (e.movementX || 0)));
-    _vCursor.y = Math.max(0, Math.min(window.innerHeight - 1, _vCursor.y + (e.movementY || 0)));
+    // Unbounded — the camera can now be pushed past any "edge", we don't
+    // clamp the virtual cursor while pointer lock is active.
+    _vCursor.x += (e.movementX || 0);
+    _vCursor.y += (e.movementY || 0);
   } else {
     _vCursor.x = e.clientX;
     _vCursor.y = e.clientY;
@@ -3424,9 +3427,7 @@ window.addEventListener('mousemove', e => {
   markInput();
 });
 window.addEventListener('resize', () => {
-  // Keep the virtual cursor inside the new viewport bounds.
-  _vCursor.x = Math.min(_vCursor.x, window.innerWidth - 1);
-  _vCursor.y = Math.min(_vCursor.y, window.innerHeight - 1);
+  // No clamping — _vCursor is free to live outside the viewport.
 });
 
 // Pointer-lock helpers. Lock keeps the cursor trapped in the canvas while
@@ -4521,9 +4522,13 @@ function resolveQuizAnswerHit(b, appleIndex, apple) {
 
   if (!correct) {
     state.streak = 0;
+    state.learning.wrongAnswers++;
     AudioFx.miss();
     shatterApple(appleIndex, b.hitPoint, b.dir);
-    updateQuestionBanner('Неверно. Опьянение не растёт, попробуй ещё раз.');
+    const hitCap = state.learning.wrongAnswers >= 3;
+    updateQuestionBanner(hitCap
+      ? 'Неверно. Третья ошибка — максимум опьянения вырос на 25%.'
+      : 'Неверно. Попробуй ещё раз.');
     setTimeout(() => {
       if (state.learning.currentQuiz === quiz) {
         _nextAppleLabel = 1;
@@ -4928,9 +4933,11 @@ function bumpPromilleMiss() {
 }
 function effectivePromilleMul() {
   // Quadratic curve — gentle for the first half of the bar, punishing past 60.
-  // 0 → ×1.0 ; 50 → ×1.9 ; 75 → ×3.0 ; 100 → ×4.6.
+  // Default cap is 25% weaker than the legacy values; 3+ wrong answers in the
+  // session unlock the original ceiling (×4.6 at promille=100).
   const p = state.promille / 100;
-  return 1.0 + p * p * 3.6;
+  const capScale = state.learning.wrongAnswers >= 3 ? 1.0 : 0.75;
+  return 1.0 + p * p * 3.6 * capScale;
 }
 
 function endSession() {
@@ -4978,6 +4985,7 @@ function restartSession() {
   state.learning.loading = false;
   state.learning.questionsAnswered = 0;
   state.learning.questionsCorrect = 0;
+  state.learning.wrongAnswers = 0;
   updateQuestionBanner();
   _nextAppleLabel = 1;
   refillBolts();
@@ -5066,16 +5074,12 @@ function tick() {
   const soberWave = state.wave.num <= 1;
   const drift = soberWave ? 0 : state.drunk * atemMul * schnapsMul * promMul;
   const posDriftMul = soberWave ? 0 : atemMul * promMul;
-  // Asymmetric yaw: leftward pan is clamped near the right edge of the
-  // fireplace (which sits around world x≈-2 from the camera), so the view
-  // can't drift off the scene on that side.
-  const AIM_YAW_LEFT  = 0.78;   // max additional yaw when looking left
-  const AIM_YAW_RIGHT = 1.00;   // max additional yaw when looking right
-  const AIM_PITCH = 0.68;   // max pitch
-  const camAimX = state.aim.x >= 0
-    ? -state.aim.x * AIM_YAW_RIGHT   // mouse right → yaw < 0 → look right ✓
-    : -state.aim.x * AIM_YAW_LEFT;   // mouse left  → yaw > 0 → look left, clamped
-  const camAimY =  state.aim.y * AIM_PITCH;   // mouse up    → pitch > 0 → look up  ✓
+  // Camera yaw/pitch are unbounded — state.aim grows freely with mouse
+  // movement (no _vCursor clamp), so these scalars just set the gain.
+  const AIM_YAW = 1.00;
+  const AIM_PITCH = 0.68;
+  const camAimX = -state.aim.x * AIM_YAW;       // mouse right → yaw < 0 → look right ✓
+  const camAimY =  state.aim.y * AIM_PITCH;     // mouse up    → pitch > 0 → look up  ✓
 
   // Spring + damping into camera rotation. This produces the "lag" between the
   // mouse and where the camera actually ends up — the drunk feel.
@@ -5132,16 +5136,9 @@ function tick() {
   // the player left it. Hiccups still nudge it (and don't spring back).
   state.idleDrift = 0;
 
-  // Compose final camera orientation.
-  // Hiccup (wave 2+): persistent offset that doesn't decay through the aim
-  // spring — adds directly to the final rotation. Hides behind the spring's
-  // own noise, but accumulates if the player idles.
-  // Compose final camera rotation. The aim component itself is already
-  // clamped to ±AIM_YAW_* / ±AIM_PITCH through camAimX/Y, so the player's
-  // own mouse range stays fixed. Hiccup / sway / recoil are added on top
-  // without an extra clamp — they can momentarily push the view a bit
-  // past the box during a lurch, but they don't subtract from the
-  // player's aim reach.
+  // Compose final camera orientation. There is no clamp on aim now —
+  // _vCursor grows unbounded while pointer-locked, so the camera can be
+  // pushed to any yaw/pitch. Hiccup / sway / recoil are layered on top.
   camera.rotation.y = BASE_YAW + state.aimSmooth.x + state.cameraSway.x + state.wave.hiccupX + _viewNudge.x;
   camera.rotation.x = BASE_PITCH + state.aimSmooth.y + state.cameraSway.y + state.recoilOffset * 0.10 - state.idleDrift + state.wave.hiccupY + _viewNudge.y;
 
