@@ -4760,9 +4760,14 @@ function tickWave(realDt) {
   // Hover-bob the floating labels above each apple.
   tickAppleLabels();
 
-  // Promille creep — slow base + small per-wave bonus.
-  const waveBonus = Math.max(0, state.wave.num - 1) * 0.12;
-  state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus));
+  // Promille creep — slow base + small per-wave bonus. Wave 1 is a sober
+  // warm-up: no accumulation, and the meter is pinned at zero.
+  if (state.wave.num <= 1) {
+    state.promille = 0;
+  } else {
+    const waveBonus = (state.wave.num - 2) * 0.12;
+    state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus));
+  }
   applyPromilleUi();
   updateWaveTag();
 }
@@ -4915,7 +4920,9 @@ function bumpPromilleHit(zone) {
   applyPromilleUi();
 }
 function bumpPromilleMiss() {
-  state.promille = Math.min(100, state.promille + 12);
+  // Wave 1 is a dry run — no drunkenness builds up at all.
+  if (state.wave.num <= 1) return;
+  state.promille = Math.min(100, state.promille + 10);
   applyPromilleUi();
 }
 function effectivePromilleMul() {
@@ -5054,8 +5061,10 @@ function tick() {
   const atemMul = state.fx.atem > 0 ? 0.5 : 1.0;
   const schnapsMul = state.fx.schnaps > 0 ? 2.0 : 1.0;
   const promMul = effectivePromilleMul();
-  const drift = state.drunk * atemMul * schnapsMul * promMul;
-  const posDriftMul = atemMul * promMul;
+  // Wave 1 is fully sober — kill drunken micro-jitter and positional drift.
+  const soberWave = state.wave.num <= 1;
+  const drift = soberWave ? 0 : state.drunk * atemMul * schnapsMul * promMul;
+  const posDriftMul = soberWave ? 0 : atemMul * promMul;
   // Asymmetric yaw: leftward pan is clamped near the right edge of the
   // fireplace (which sits around world x≈-2 from the camera), so the view
   // can't drift off the scene on that side.
