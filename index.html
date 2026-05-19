@@ -148,11 +148,12 @@
     #crosshair { width: 64px; height: 64px; }
     #bonus-bar {
       bottom: calc(env(safe-area-inset-bottom, 0px) + 112px);
-      gap: 4px;
+      gap: 3px;
+      padding: 0 4px;
     }
-    .bonus-tile { min-width: 56px; padding: 4px 5px 3px; }
-    .bonus-tile .title { font-size: 9px; margin-bottom: 2px; }
-    .bonus-tile .sub { width: 9px; height: 9px; }
+    .bonus-tile { min-width: 48px; padding: 3px 4px 3px; }
+    .bonus-tile .title { font-size: 8px; margin-bottom: 2px; letter-spacing: 0.3px; }
+    .bonus-tile .sub { width: 8px; height: 8px; }
     #ammo { top: 8px; padding: 4px 8px; font-size: 11px; gap: 5px; }
     #ammo .dot { width: 5px; height: 14px; }
     #promille-meter { top: 38px; padding: 3px 8px; font-size: 10px; gap: 5px; }
@@ -3581,22 +3582,55 @@ function tickViewNudge(realDt) {
   // only thing that moves the camera here.
 }
 
-// Touch input — drag anywhere on the canvas to move the reticle (same
-// absolute mapping as the mouse). The fire and respawn buttons are
-// separate DOM elements; everything else is aim drag.
-function handleTouchAim(e) {
+// Touch input — relative drag. We remember where the finger landed and
+// only react to motion from that anchor: tapping any spot on the canvas
+// no longer snaps the camera, it just sets the reference for the next
+// movement. The aim updates by deltas, mirroring the desktop pointer-lock
+// model, so the player can spin freely past any "edge".
+const _touchAnchor = { x: 0, y: 0, active: false, id: null };
+const TOUCH_AIM_SENS = 1.6; // multiplier on raw finger pixels
+function _touchById(touchList, id) {
+  if (id == null) return null;
+  for (let i = 0; i < touchList.length; i++) if (touchList[i].identifier === id) return touchList[i];
+  return null;
+}
+function handleTouchStart(e) {
   if (!e.touches || e.touches.length === 0) return;
-  // Skip if the initial target is a HUD element — the user is interacting
-  // with sliders or buttons, not aiming.
   if (isHudTarget(e.target)) return;
-  const t = e.touches[0];
-  state.aim.x = (t.clientX / window.innerWidth) * 2 - 1;
-  state.aim.y = -((t.clientY / window.innerHeight) * 2 - 1);
+  // Pick the newest touch as the aim anchor — no camera jump.
+  const t = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e.touches[0];
+  _touchAnchor.x = t.clientX;
+  _touchAnchor.y = t.clientY;
+  _touchAnchor.id = t.identifier;
+  _touchAnchor.active = true;
   markInput();
   if (e.cancelable) e.preventDefault();
 }
-window.addEventListener('touchstart', handleTouchAim, { passive: false });
-window.addEventListener('touchmove',  handleTouchAim, { passive: false });
+function handleTouchMove(e) {
+  if (!_touchAnchor.active) return;
+  if (isHudTarget(e.target)) return;
+  const t = _touchById(e.touches, _touchAnchor.id) || e.touches[0];
+  if (!t) return;
+  const dx = (t.clientX - _touchAnchor.x) * TOUCH_AIM_SENS;
+  const dy = (t.clientY - _touchAnchor.y) * TOUCH_AIM_SENS;
+  _touchAnchor.x = t.clientX;
+  _touchAnchor.y = t.clientY;
+  _vCursor.x += dx;
+  _vCursor.y += dy;
+  _applyAimFromVCursor();
+  markInput();
+  if (e.cancelable) e.preventDefault();
+}
+function handleTouchEnd(e) {
+  if (!e.touches || e.touches.length === 0) {
+    _touchAnchor.active = false;
+    _touchAnchor.id = null;
+  }
+}
+window.addEventListener('touchstart', handleTouchStart, { passive: false });
+window.addEventListener('touchmove',  handleTouchMove,  { passive: false });
+window.addEventListener('touchend',   handleTouchEnd,   { passive: false });
+window.addEventListener('touchcancel', handleTouchEnd,  { passive: false });
 
 const fireBtn = document.getElementById('fire-btn');
 if (fireBtn) {
