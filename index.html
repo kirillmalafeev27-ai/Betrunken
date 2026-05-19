@@ -1744,7 +1744,7 @@ const BONUS_CATEGORIES = [
   { id: 'res', title: 'Ресурсы', subs: [
       { id: 'schnaps', pos: 3, name: 'Schnaps', desc: '+опьянение, но возвращает камеру к точке прицела' },
       { id: 'kocher',  pos: 2, name: 'Köcher',   desc: 'следующие 2 выстрела не тратят болты' },
-      { id: 'zinsen',  pos: 1, name: 'Zinsen',  desc: 'следующее попадание — двойной выбор' },
+      { id: 'zinsen',  pos: 1, name: 'Zinsen',  desc: 'после следующего попадания — выбери ещё 2 бонуса с любой плитки' },
   ]},
   { id: 'def', title: 'Защита', subs: [
       { id: 'geduld', pos: 3, name: 'Geduld', desc: 'икота вдвое реже до конца волны' },
@@ -2670,7 +2670,9 @@ function renderBonusBar() {
         // Open the picker BEFORE finishing pending — openSubPicker's
         // unlockPointer is then idempotent and we skip the brief lock
         // attempt that finishZinsenPending would otherwise trigger.
-        openSubPicker(tile.id);
+        // Zinsen grants TWO free picks on the second tile (one extra
+        // pick on top of the usual one), so pass picks=2.
+        openSubPicker(tile.id, 2);
         state.fx.zinsenPending = false;
         document.body.classList.remove('zinsen');
         const p = document.getElementById('zinsen-prompt');
@@ -2863,11 +2865,11 @@ function availableSubs(tile) {
 
 let _pickerTile = null;
 let _pickerRemaining = 0;
-function openSubPicker(tileId) {
+function openSubPicker(tileId, picks = 1) {
   const tile = state.bonusTiles.find(t => t.id === tileId);
   if (!tile) return false;
   _pickerTile = tile;
-  _pickerRemaining = 1;
+  _pickerRemaining = Math.max(1, picks | 0);
   renderSubPicker();
   document.getElementById('sub-picker').classList.add('on');
   // Release pointer lock so the player can click the options.
