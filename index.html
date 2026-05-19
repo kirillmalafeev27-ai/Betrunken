@@ -24,9 +24,27 @@
     position: absolute; top: 0; left: 0; right: 0;
     padding: 14px 18px;
     display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 10px;
     pointer-events: none;
     z-index: 5;
   }
+  #restart-btn {
+    pointer-events: auto;
+    cursor: pointer;
+    background: rgba(20,18,16,0.78);
+    border: 1px solid rgba(200,144,96,0.42);
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    font-size: 12px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background 0.12s, border-color 0.12s;
+  }
+  #restart-btn:hover { background: #3a3733; border-color: var(--accent); }
+  #restart-btn:active { transform: translateY(1px); }
   .hud-card {
     background: rgba(20,18,16,0.72);
     backdrop-filter: blur(6px);
@@ -1152,6 +1170,7 @@
     <div class="hud-card stats">
       выстрелов: <b id="shots">0</b> &nbsp;·&nbsp; попаданий: <b id="hits">0</b> &nbsp;·&nbsp; <span id="acc">—</span> &nbsp;·&nbsp; очки: <b id="score">0</b> &nbsp;·&nbsp; <span id="euros-line">€<b id="euros">0</b></span>
     </div>
+    <button id="restart-btn" type="button" title="Перезапустить сессию">Рестарт</button>
   </div>
 
   <div id="controls">
@@ -1763,7 +1782,7 @@ const BONUS_CATEGORIES = [
 // At t == N, all sub-quads are fully bright. As t decreases, the RIGHTMOST
 // sub-quad fades first (linearly). When t crosses i, sub-quad at column i
 // becomes fully empty. So opacity for the sub at LEFT-index i = clamp(t - i, 0, 1).
-const TILE_DRAIN_RATE = 1 / 15;  // one sub-quad (ability cycle) drains in 15 sec
+const TILE_DRAIN_RATE = 1 / 45;  // one sub-quad (ability cycle) drains in 45 sec
 const TILE_MISS_PENALTY = 0.5; // half a sub-quad per miss
 const TILE_HIT_REGEN_FRAC = 0.5; // hit refills to >= 50% of N
 
@@ -3377,9 +3396,10 @@ window.addEventListener('contextmenu', (e) => {
 // been consumed at tryShoot. We do that at tryShoot site already, below in the
 // shot-fire hook patched there. Here is the centralised consumption fallback.
 
-$('reset').addEventListener('click', () => {
+function resetSession() {
   state.shots = 0; state.hits = 0; state.score = 0; state.euros = 0;
   state.streak = 0; state.bestStreak = 0;
+  state.promille = 0;
   state.claimedSubs.length = 0;
   // Clear all fx
   for (const k of Object.keys(state.fx)) {
@@ -3395,13 +3415,28 @@ $('reset').addEventListener('click', () => {
   state.selectedTileId = null;
   state.learning.currentQuiz = null;
   state.learning.loading = false;
+  state.learning.questionsAnswered = 0;
+  state.learning.questionsCorrect = 0;
+  state.learning.wrongAnswers = 0;
+  // Drop back to wave 1 breather so the player gets a clean run.
+  startWaveBreather(1);
   updateQuestionBanner();
   refillBolts();
   renderBonusBar();
   updateActiveFx();
+  applyPromilleUi();
   updateStats();
-});
-$('respawn').addEventListener('click', respawnApple);
+}
+const resetBtn = document.getElementById('reset');
+if (resetBtn) resetBtn.addEventListener('click', resetSession);
+const respawnElBtn = document.getElementById('respawn');
+if (respawnElBtn) respawnElBtn.addEventListener('click', respawnApple);
+const restartBtn = document.getElementById('restart-btn');
+if (restartBtn) {
+  const onRestart = (e) => { e.preventDefault(); e.stopPropagation(); resetSession(); };
+  restartBtn.addEventListener('click', onRestart);
+  restartBtn.addEventListener('touchstart', onRestart, { passive: false });
+}
 
 // ---------------------------------------------------------------------------
 // Input
@@ -4698,14 +4733,25 @@ function shatterApple(idx, impactPoint, impactDir) {
 // ---------------------------------------------------------------------------
 const WAVE_DEFAULT_ACTIVE_SEC = 90;
 const WAVE_BREATHER_SEC = 3;
+// Debuff tokens used per wave:
+//   'hiccup'+'tunnel' — drunken camera lurch / tunnel vision (paired)
+//   'shrink'          — apples slowly shrink
+//   'pendulum'        — apples move (swing/sway)
+//   'double'          — apple twins (pick the real one)
+//   'shield'          — armoured apples
 const WAVE_CONFIG = [
-  { num: 1, title: 'ВОЛНА I',   sub: 'Разминка. Стреляй спокойно.',                          debuffs: [] },
-  { num: 2, title: 'ВОЛНА II',  sub: 'Икота и туннельное зрение, особенно при бездействии.', debuffs: ['hiccup', 'tunnel'] },
-  { num: 3, title: 'ВОЛНА III', sub: 'Двойники яблок — выбери настоящее.',                   debuffs: ['double'] },
-  { num: 4, title: 'ВОЛНА IV',  sub: 'Усыхание, маятник и щит-яблоки.',                      debuffs: ['shrink', 'pendulum', 'shield'] },
-  { num: 5, title: 'ВОЛНА V',   sub: 'Икота + маятник + щиты.',                              debuffs: ['hiccup', 'tunnel', 'shrink', 'pendulum', 'shield'] },
-  { num: 6, title: 'ВОЛНА VI',  sub: 'Полный мрак — всё сразу.',                             debuffs: ['hiccup', 'tunnel', 'double', 'shrink', 'pendulum', 'shield'] },
-  { num: 7, title: 'ФИНАЛ',     sub: 'Лёгкий бой. Добивай и закрывай сессию.',               debuffs: [] },
+  { num: 1,  title: 'ВОЛНА I',    sub: 'Разминка — без опьянения.',                              debuffs: [] },
+  { num: 2,  title: 'ВОЛНА II',   sub: 'Опьянение появляется, промахи без штрафа.',              debuffs: [] },
+  { num: 3,  title: 'ВОЛНА III',  sub: 'Опьянение + икота и туннельное зрение.',                 debuffs: ['hiccup', 'tunnel'] },
+  { num: 4,  title: 'ВОЛНА IV',   sub: 'Штраф за промах. Икота уходит.',                         debuffs: [] },
+  { num: 5,  title: 'ВОЛНА V',    sub: 'Штраф за промах + сжимающиеся яблоки.',                  debuffs: ['shrink'] },
+  { num: 6,  title: 'ВОЛНА VI',   sub: 'Движение яблок вместо сжатия.',                          debuffs: ['pendulum'] },
+  { num: 7,  title: 'ВОЛНА VII',  sub: 'Раздвоение яблок.',                                       debuffs: ['double'] },
+  { num: 8,  title: 'ВОЛНА VIII', sub: 'Бронированные яблоки.',                                  debuffs: ['shield'] },
+  { num: 9,  title: 'ВОЛНА IX',   sub: 'Движение + броня.',                                      debuffs: ['pendulum', 'shield'] },
+  { num: 10, title: 'ВОЛНА X',    sub: 'Движение + броня + сжатие.',                             debuffs: ['pendulum', 'shield', 'shrink'] },
+  { num: 11, title: 'ВОЛНА XI',   sub: 'Движение + броня + сжатие + раздвоение.',                debuffs: ['pendulum', 'shield', 'shrink', 'double'] },
+  { num: 12, title: 'ФИНАЛ',      sub: 'Всё сразу + жёсткая икота и туннельное.',                debuffs: ['pendulum', 'shield', 'shrink', 'double', 'hiccup', 'tunnel'] },
 ];
 function waveDuration(num) {
   const cfg = WAVE_CONFIG[num - 1];
@@ -4962,8 +5008,9 @@ function bumpPromilleHit(zone) {
   applyPromilleUi();
 }
 function bumpPromilleMiss() {
-  // Wave 1 is a dry run — no drunkenness builds up at all.
-  if (state.wave.num <= 1) return;
+  // Waves 1-3 don't penalise misses. Wave 1 is fully sober; waves 2-3
+  // let promille creep over time but skip the +10 spike on each miss.
+  if (state.wave.num < 4) return;
   state.promille = Math.min(100, state.promille + 10);
   applyPromilleUi();
 }
