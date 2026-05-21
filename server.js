@@ -21,6 +21,12 @@ const AITUNNEL_MODELS = (process.env.AITUNNEL_MODELS || 'gpt-5.4,gpt-5.2,gpt-5,g
   .filter(Boolean);
 
 const questionPool = {};
+const audioQuestionPool = {};
+const ttsAudioCache = new Map();
+const TTS_CACHE_LIMIT = Number(process.env.TTS_CACHE_LIMIT || 180);
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || process.env.ELEVEN_API_KEY || '';
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
+const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_turbo_v2_5';
 
 const TOPIC_RULES = {
   'Infinitiv mit zu': `Verwende NUR Verben, die "zu + Infinitiv" verlangen: versuchen, beginnen, anfangen, aufhören, vorhaben, hoffen, vergessen, planen, sich freuen, Lust haben, Es ist wichtig/möglich/schwer... NIEMALS Modalverben (können, müssen, sollen, wollen, dürfen, mögen) — diese stehen mit Infinitiv OHNE "zu"! Richtig: "Er versucht, den Bahnhof zu finden." | Falsch: "Er kann den Bahnhof zu finden."`,
@@ -94,6 +100,15 @@ function normalizeAnswerText(value) {
 function answerLetterToIndex(letter) {
   const value = String(letter || '').trim().toUpperCase();
   return ['A', 'B', 'C', 'D'].indexOf(value);
+}
+
+function shuffle(items) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
 function parseSyntheticQuestions(rawText, expectedCount) {
@@ -188,6 +203,188 @@ function parseJsonQuestions(rawText) {
   const jsonStr = jsonMatch ? jsonMatch[0] : text;
   const parsed = JSON.parse(jsonStr);
   return Array.isArray(parsed) ? parsed.filter(isValidQuestion) : [];
+}
+
+function stripOuterQuotes(value) {
+  return String(value || '')
+    .replace(/^[\s"'`«»„“”]+|[\s"'`«»„“”]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseAudioPairs(rawText, expectedCount) {
+  const text = String(rawText || '')
+    .replace(/\r/g, '')
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, ''))
+    .trim();
+  if (!text) return [];
+
+  const chunks = text
+    .split(/\n+|(?=\s*\d{1,2}[\).]\s+)/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const parsed = [];
+  const seen = new Set();
+  for (const chunk of chunks) {
+    let line = chunk
+      .replace(/^\s*(?:[-*•]\s*)?(?:\d{1,2}[\).:-]\s*)?/, '')
+      .trim();
+    if (!line || /^(paare|pairs|sätze|saetze|sentences|antworten|translations)/i.test(line)) continue;
+
+    let match = line.match(/^(?:DE|Deutsch|Original)\s*:\s*(.+?)\s*(?:RU|Russisch|Russian|Русский|Перевод)\s*:\s*(.+)$/i);
+    if (!match) match = line.match(/^(.+?)\s*(?:—|–|->|=>|\|)\s*(.+)$/);
+    if (!match) match = line.match(/^(.+?)\s+-\s+(.+)$/);
+    if (!match) match = line.match(/^(.+?)\s*:\s*(.+)$/);
+    if (!match) continue;
+
+    const de = stripOuterQuotes(match[1]);
+    const ru = stripOuterQuotes(match[2]);
+    if (!de || !ru) continue;
+    if (/[А-Яа-яЁё]/.test(de)) continue;
+    if (!/[А-Яа-яЁё]/.test(ru)) continue;
+    if (de.length < 8 || ru.length < 8 || de.length > 220 || ru.length > 220) continue;
+
+    const key = normalizeAnswerText(de);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parsed.push({ de, ru });
+    if (parsed.length >= expectedCount) break;
+  }
+  return parsed;
+}
+
+function capitalizeLikeSource(value, source) {
+  if (!value) return value;
+  return /^[А-ЯЁ]/.test(source || '') ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+function replaceFirstWordPair(text, from, to) {
+  const re = new RegExp(`(^|[\\s,.;:!?("«])(${from})(?=$|[\\s,.;:!?)"»])`, 'iu');
+  const match = text.match(re);
+  if (!match) return '';
+  const replacement = capitalizeLikeSource(to, match[2]);
+  return text.replace(re, `${match[1]}${replacement}`);
+}
+
+function buildRussianDistractors(correct, allPairs) {
+  const base = stripOuterQuotes(correct).replace(/\s+/g, ' ');
+  const normalizedCorrect = normalizeAnswerText(base);
+  const options = [];
+  const add = (value) => {
+    const option = stripOuterQuotes(value).replace(/\s+/g, ' ');
+    if (!option) return;
+    const norm = normalizeAnswerText(option);
+    if (!norm || norm === normalizedCorrect) return;
+    if (options.some((existing) => normalizeAnswerText(existing) === norm)) return;
+    options.push(option);
+  };
+
+  const pairRules = [
+    ['я', 'мы'], ['мы', 'я'], ['ты', 'вы'], ['вы', 'ты'],
+    ['он', 'она'], ['она', 'он'], ['они', 'мы'],
+    ['мой', 'твой'], ['моя', 'твоя'], ['мое', 'твое'], ['мои', 'твои'],
+    ['наш', 'ваш'], ['наша', 'ваша'], ['сегодня', 'завтра'],
+    ['завтра', 'сегодня'], ['вчера', 'сегодня'], ['утром', 'вечером'],
+    ['вечером', 'утром'], ['сейчас', 'позже'], ['рано', 'поздно'],
+    ['поздно', 'рано'], ['часто', 'редко'], ['редко', 'часто'],
+    ['всегда', 'иногда'], ['иногда', 'всегда'], ['может', 'должен'],
+    ['должен', 'может'], ['можем', 'должны'], ['должны', 'можем'],
+    ['хочет', 'должен'], ['хочу', 'должен'], ['нужно', 'можно'],
+    ['можно', 'нужно'], ['домой', 'на работу'], ['дома', 'на работе'],
+    ['в школе', 'в офисе'], ['в офисе', 'в школе'], ['в городе', 'за городом'],
+    ['быстро', 'медленно'], ['медленно', 'быстро'], ['хорошо', 'плохо'],
+    ['плохо', 'хорошо'], ['большой', 'маленький'], ['маленький', 'большой'],
+  ];
+
+  for (const [from, to] of pairRules) add(replaceFirstWordPair(base, from, to));
+
+  if (/\bне\b/iu.test(base)) {
+    add(base.replace(/(^|[\s,.;:!?("«])не\s+/iu, '$1'));
+  } else {
+    add(base.replace(/^(\S+)/u, '$1 не'));
+  }
+
+  if (!/[.!?]$/.test(base)) {
+    add(base + ' сегодня.');
+    add(base + ' завтра.');
+  } else {
+    add(base.replace(/[.!?]$/u, ' сегодня.'));
+    add(base.replace(/[.!?]$/u, ' завтра.'));
+  }
+
+  const neighbors = (allPairs || [])
+    .map((pair) => pair.ru)
+    .filter(Boolean)
+    .sort((a, b) => Math.abs(a.length - base.length) - Math.abs(b.length - base.length));
+  for (const neighbor of neighbors) add(neighbor);
+
+  const generic = [
+    'Он делает это завтра, а не сегодня.',
+    'Мы говорим об этом позже.',
+    'Она не согласна с этим решением.',
+    'Я выбираю другой вариант.',
+    'Они уже закончили эту работу.',
+  ];
+  for (const value of generic) add(value);
+
+  return options.slice(0, 3);
+}
+
+function formatAudioQuestion(pair, allPairs, level, lexicalTopic) {
+  const distractors = buildRussianDistractors(pair.ru, allPairs);
+  if (distractors.length < 3) return null;
+  const correctAnswer = stripOuterQuotes(pair.ru);
+  const options = shuffle([correctAnswer, ...distractors]).slice(0, 4);
+  const correct = options.findIndex((option) => normalizeAnswerText(option) === normalizeAnswerText(correctAnswer));
+  if (correct < 0) return null;
+  const uniqueOptions = new Set(options.map(normalizeAnswerText));
+  if (uniqueOptions.size !== 4) return null;
+
+  return {
+    mode: 'audio',
+    level,
+    topic: lexicalTopic || 'Audio',
+    text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+    display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+    audioText: pair.de,
+    options,
+    correct
+  };
+}
+
+function isValidAudioQuestion(q) {
+  return isValidQuestion(q) && typeof q.audioText === 'string' && q.audioText.trim().length > 0;
+}
+
+function buildAudioPrompt({ level, lexicalTopic, questionsCount, exclude }) {
+  const excludePart = exclude && exclude.length
+    ? `\nНе используй эти немецкие предложения повторно: ${exclude.slice(-12).map((item) => `"${item}"`).join(', ')}\n`
+    : '';
+
+  return `Du bist ein erfahrener DaF-Lehrer.
+
+Erstelle genau ${questionsCount} kurze deutsche Hörverstehen-Sätze mit exakter russischer Übersetzung.
+Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz über ${level}.
+Lexikalisches Thema: ${lexicalTopic || 'Alltag'}.
+${excludePart}
+Regeln:
+1. Jeder deutsche Satz ist natürlich, vollständig und 6 bis 14 Wörter lang.
+2. Die russische Übersetzung ist exakt, aber kurz genug für eine Multiple-Choice-Antwort.
+3. Keine Optionen, keine Erklärungen, kein JSON, kein Markdown.
+4. Jede Zeile hat genau dieses Format:
+1. Deutscher Satz. — Русский перевод.
+
+Schreibe nur die ${questionsCount} Zeilen mit Original und Übersetzung.`;
+}
+
+function putTtsCache(key, entry) {
+  if (ttsAudioCache.has(key)) ttsAudioCache.delete(key);
+  ttsAudioCache.set(key, entry);
+  while (ttsAudioCache.size > TTS_CACHE_LIMIT) {
+    const oldestKey = ttsAudioCache.keys().next().value;
+    ttsAudioCache.delete(oldestKey);
+  }
 }
 
 function buildSyntheticPrompt({ level, lexicalTopic, grammarTopic, isWortstellung, questionsCount, exclude, topicRule }) {
@@ -362,6 +559,139 @@ Regeln für Lückenübungen:
   } catch (err) {
     console.error('Synthetic parse error:', err.message, 'Raw text:', text.slice(0, 500));
     res.status(502).json({ error: 'Failed to parse LLM response', detail: err.message });
+  }
+});
+
+app.post('/api/generate-audio-questions', async (req, res) => {
+  const { level, lexicalTopic, count, exclude } = req.body;
+
+  if (!level) {
+    return res.status(400).json({ error: 'level is required' });
+  }
+
+  if (!aitunnelClient) {
+    return res.status(503).json({ error: 'AITUNNEL_API_KEY is not configured' });
+  }
+
+  const questionsCount = count || 10;
+  const cacheKey = `audio:${level}:${lexicalTopic || ''}`;
+
+  if (audioQuestionPool[cacheKey] && audioQuestionPool[cacheKey].length >= questionsCount) {
+    const cached = audioQuestionPool[cacheKey].splice(0, questionsCount);
+    res.json({ questions: cached });
+    return;
+  }
+
+  const prompt = buildAudioPrompt({
+    level,
+    lexicalTopic,
+    questionsCount: Math.max(questionsCount, 10),
+    exclude
+  });
+
+  const errors = [];
+  let text = null;
+
+  for (const model of AITUNNEL_MODELS) {
+    try {
+      const completion = await aitunnelClient.chat.completions.create({
+        model,
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const content = completion.choices?.[0]?.message?.content;
+      if (content && content.trim()) {
+        text = content.trim();
+        break;
+      }
+      errors.push(`${model}: empty response`);
+    } catch (err) {
+      const detail = err?.message || String(err);
+      errors.push(`${model}: ${detail}`);
+      console.error(`AI Tunnel audio error on model ${model}:`, detail);
+    }
+  }
+
+  if (!text) {
+    return res.status(502).json({ error: 'AI Tunnel: all models failed', detail: errors.join(' | ') });
+  }
+
+  try {
+    const pairs = parseAudioPairs(text, Math.max(questionsCount, 10));
+    const valid = pairs
+      .map((pair) => formatAudioQuestion(pair, pairs, level, lexicalTopic))
+      .filter(isValidAudioQuestion);
+
+    if (!valid.length) {
+      console.error('No valid audio pairs parsed. Raw text:', text.slice(0, 500));
+      return res.status(502).json({ error: 'No valid audio pairs in LLM response' });
+    }
+
+    if (valid.length > questionsCount) {
+      if (!audioQuestionPool[cacheKey]) audioQuestionPool[cacheKey] = [];
+      audioQuestionPool[cacheKey].push(...valid.slice(questionsCount));
+    }
+
+    res.json({ questions: valid.slice(0, questionsCount) });
+  } catch (err) {
+    console.error('Audio parse error:', err.message, 'Raw text:', text.slice(0, 500));
+    res.status(502).json({ error: 'Failed to parse audio LLM response', detail: err.message });
+  }
+});
+
+app.post('/api/tts', async (req, res) => {
+  const text = String(req.body?.text || '').replace(/\s+/g, ' ').trim();
+  if (!text) return res.status(400).json({ error: 'text is required' });
+  if (text.length > 420) return res.status(400).json({ error: 'text is too long' });
+  if (!ELEVENLABS_API_KEY) {
+    return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not configured' });
+  }
+
+  const cacheKey = `${ELEVENLABS_VOICE_ID}:${ELEVENLABS_MODEL_ID}:${text}`;
+  const cached = ttsAudioCache.get(cacheKey);
+  if (cached) {
+    res.setHeader('Content-Type', cached.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('X-TTS-Cache', 'HIT');
+    return res.send(cached.buffer);
+  }
+
+  try {
+    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(ELEVENLABS_VOICE_ID)}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY,
+      },
+      body: JSON.stringify({
+        text,
+        model_id: ELEVENLABS_MODEL_ID,
+        voice_settings: {
+          stability: 0.45,
+          similarity_boost: 0.75,
+          use_speaker_boost: true
+        }
+      }),
+    });
+
+    if (!ttsResponse.ok) {
+      const detail = await ttsResponse.text().catch(() => '');
+      return res.status(502).json({ error: 'ElevenLabs TTS failed', detail: detail.slice(0, 500) });
+    }
+
+    const contentType = ttsResponse.headers.get('content-type') || 'audio/mpeg';
+    const buffer = Buffer.from(await ttsResponse.arrayBuffer());
+    if (!buffer.length) return res.status(502).json({ error: 'ElevenLabs returned empty audio' });
+
+    putTtsCache(cacheKey, { buffer, contentType });
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('X-TTS-Cache', 'MISS');
+    res.send(buffer);
+  } catch (err) {
+    console.error('ElevenLabs TTS error:', err);
+    res.status(502).json({ error: 'ElevenLabs TTS request failed', detail: err?.message || String(err) });
   }
 });
 

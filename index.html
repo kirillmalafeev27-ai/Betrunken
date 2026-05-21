@@ -542,7 +542,7 @@
     padding: 6px 12px;
     color: var(--text);
     font-size: 12px;
-    z-index: 5;
+    z-index: 9;
     backdrop-filter: blur(6px);
   }
   #ammo .label { color: var(--text-dim); font-size: 10px; letter-spacing: 1px; margin-right: 2px; }
@@ -653,8 +653,44 @@
   #view-nudge .right { grid-column: 3; grid-row: 2; }
   #view-nudge .down  { grid-column: 2; grid-row: 3; }
 
+  #audio-replay {
+    position: absolute;
+    right: calc(env(safe-area-inset-right, 0px) + 18px);
+    top: calc(50% - 126px);
+    width: 54px;
+    height: 54px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(20,18,16,0.78);
+    border: 1px solid rgba(200,144,96,0.45);
+    color: var(--accent);
+    font-size: 18px;
+    font-weight: 800;
+    z-index: 6;
+    pointer-events: auto;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  #audio-replay.on { display: flex; }
+  #audio-replay.loading { opacity: 0.65; }
+  #audio-replay:hover { background: rgba(60,42,28,0.86); border-color: var(--accent); }
+
   /* Always-on wave tag — small label on the upper-right corner so the
      player can see the current wave number and seconds-left at a glance. */
+  @media (max-width: 760px), (max-height: 520px) {
+    #audio-replay {
+      right: calc(env(safe-area-inset-right, 0px) + 10px);
+      top: calc(50% - 108px);
+      width: 38px;
+      height: 38px;
+      font-size: 14px;
+    }
+  }
+
   #wave-tag {
     position: absolute;
     top: 90px;
@@ -965,6 +1001,7 @@
     gap: 8px;
   }
   .learning-grid.levels { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .learning-grid.modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .learning-grid.lexical { grid-template-columns: repeat(5, minmax(0, 1fr)); max-height: 148px; overflow-y: auto; padding-right: 4px; }
   .bonus-topic-slots { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .grammar-picker {
@@ -1100,6 +1137,7 @@
   <div id="streak-pop"></div>
   <div id="pick-reminder">Не стреляет? А ты выбери бонус.</div>
   <div id="question-banner"></div>
+  <button id="audio-replay" type="button" title="Переслушать">↻</button>
 
   <div id="ammo">
     <span class="label">БОЛТЫ</span>
@@ -1248,6 +1286,10 @@
         <div class="key"><b>Новое</b> — респаун</div>
       </div>
       <div class="learning-shell">
+        <div class="learning-section">
+          <h3>Режим</h3>
+          <div id="mode-buttons" class="learning-grid modes"></div>
+        </div>
         <div class="learning-section">
           <h3>Уровень</h3>
           <div id="level-buttons" class="learning-grid levels"></div>
@@ -1425,7 +1467,29 @@ const AudioFx = (() => {
     osc.stop(now + 0.16);
   }
 
-  return { shot, miss, hit, ensure };
+  let narrationSource = null;
+  async function playNarration(arrayBuffer) {
+    const ac = ensure();
+    if (narrationSource) {
+      try { narrationSource.stop(); } catch (_) {}
+      narrationSource = null;
+    }
+    const copy = arrayBuffer.slice ? arrayBuffer.slice(0) : arrayBuffer;
+    const audioBuffer = await ac.decodeAudioData(copy);
+    const src = ac.createBufferSource();
+    const gain = ac.createGain();
+    gain.gain.value = 1.0;
+    src.buffer = audioBuffer;
+    src.connect(gain).connect(ac.destination);
+    narrationSource = src;
+    src.onended = () => {
+      if (narrationSource === src) narrationSource = null;
+    };
+    src.start();
+    return src;
+  }
+
+  return { shot, miss, hit, ensure, playNarration };
 })();
 
 // ---------------------------------------------------------------------------
@@ -1601,6 +1665,7 @@ const state = {
   claimedSubs: [],   // [{tileId, subId, t}] log of picked sub-bonuses
   learning: {
     assetsReady: false,
+    mode: 'grammar',
     level: 'A2',
     lexicalTopic: 'Alltag',
     grammarSlots: [],
@@ -1768,7 +1833,7 @@ const BONUS_CATEGORIES = [
   { id: 'def', title: 'Защита', subs: [
       { id: 'geduld', pos: 3, name: 'Geduld', desc: 'икота вдвое реже до конца волны' },
       { id: 'schild', pos: 2, name: 'Schild', desc: 'два debuff-тика в текущей волне игнорируются' },
-      { id: 'kaffee', pos: 1, name: 'Kaffee', desc: 'снимает 40% опьянения и сбивает debuff' },
+      { id: 'kaffee', pos: 1, name: 'Kaffee', desc: 'снимает 50 пунктов промилле и сбивает debuff' },
   ]},
   { id: 'info', title: 'Чтение', subs: [
       { id: 'rhythmus',  pos: 4, name: 'Glückschuss', desc: 'следующие 2 промаха не наказывают опьянением' },
@@ -1794,6 +1859,10 @@ state.bonusTiles = BONUS_CATEGORIES.map(cat => ({
 }));
 
 const LEARNING_STORAGE_KEY = 'betrunken.learning.v2';
+const LEARNING_MODES = [
+  { id: 'grammar', title: 'Грамматика', desc: 'немецкие варианты ответа' },
+  { id: 'audio', title: 'Аудио', desc: 'слушай немецкий, выбирай перевод' },
+];
 const LANGUAGE_LEVELS = ['A1', 'A2', 'B1', 'B2'];
 
 const LEXICAL_TOPICS = [
@@ -2120,6 +2189,81 @@ const QUESTION_POOL = [
     }
 ];
 
+const AUDIO_QUESTION_POOL = [
+    {
+        level: 'A1',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Ich kaufe heute Brot und Käse.',
+        options: ['Сегодня я покупаю хлеб и сыр.', 'Завтра я покупаю хлеб и сыр.', 'Сегодня мы покупаем хлеб и сыр.', 'Сегодня я не покупаю хлеб и сыр.'],
+        correct: 0
+    },
+    {
+        level: 'A1',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Der Zug kommt um acht Uhr an.',
+        options: ['Поезд прибывает в восемь часов.', 'Поезд отправляется в восемь часов.', 'Автобус прибывает в восемь часов.', 'Поезд прибывает в девять часов.'],
+        correct: 0
+    },
+    {
+        level: 'A2',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Wir müssen morgen früh zum Arzt gehen.',
+        options: ['Завтра рано мы должны пойти к врачу.', 'Сегодня рано мы должны пойти к врачу.', 'Завтра рано мы можем пойти к врачу.', 'Завтра вечером мы должны пойти к врачу.'],
+        correct: 0
+    },
+    {
+        level: 'A2',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Sie hat den Schlüssel auf dem Tisch gelassen.',
+        options: ['Она оставила ключ на столе.', 'Он оставил ключ на столе.', 'Она оставила сумку на столе.', 'Она положила ключ под стол.'],
+        correct: 0
+    },
+    {
+        level: 'B1',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Obwohl es regnet, gehen die Kinder nach draußen.',
+        options: ['Хотя идет дождь, дети выходят на улицу.', 'Потому что идет дождь, дети выходят на улицу.', 'Хотя идет дождь, дети остаются дома.', 'Когда идет дождь, дети выходят на улицу.'],
+        correct: 0
+    },
+    {
+        level: 'B1',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Ich freue mich darauf, dich wiederzusehen.',
+        options: ['Я рад снова тебя увидеть.', 'Я боюсь снова тебя увидеть.', 'Я рад снова его увидеть.', 'Я рад скоро тебе написать.'],
+        correct: 0
+    },
+    {
+        level: 'B2',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Nachdem der Vertrag unterschrieben worden war, begann die Lieferung.',
+        options: ['После того как договор был подписан, началась поставка.', 'До того как договор был подписан, началась поставка.', 'После того как договор был подписан, закончилась поставка.', 'После того как отчет был подписан, началась поставка.'],
+        correct: 0
+    },
+    {
+        level: 'B2',
+        topic: 'Audio',
+        text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
+        display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+        audioText: 'Je länger wir warten, desto schwieriger wird die Entscheidung.',
+        options: ['Чем дольше мы ждем, тем труднее становится решение.', 'Чем меньше мы ждем, тем труднее становится решение.', 'Чем дольше мы ждем, тем легче становится решение.', 'Чем дольше они ждут, тем труднее становится решение.'],
+        correct: 0
+    }
+];
+
 function shuffle(items) {
     const copy = [...items];
     for (let i = copy.length - 1; i > 0; i--) {
@@ -2131,6 +2275,7 @@ function shuffle(items) {
 
 class QuestionBank {
     constructor() {
+        this.mode = 'grammar';
         this.level = 'A2';
         this.lexicalTopic = LEXICAL_TOPICS[0];
         this.fallbackCursor = 0;
@@ -2144,6 +2289,7 @@ class QuestionBank {
     }
 
     configure(settings = {}) {
+        const nextMode = settings.mode === 'audio' ? 'audio' : 'grammar';
         const nextLevel = settings.langLevel || this.level;
         const nextLexicalTopic = settings.lexicalTopic || this.lexicalTopic;
         const nextSlots = (settings.grammarSlots || [])
@@ -2154,12 +2300,14 @@ class QuestionBank {
                 isWortstellung: Boolean(slot.isWortstellung)
             }));
         const nextSignature = JSON.stringify({
+            mode: nextMode,
             level: nextLevel,
             lexicalTopic: nextLexicalTopic,
             slots: nextSlots
         });
         const samePoolConfig = nextSignature === this.poolSignature;
 
+        this.mode = nextMode;
         this.level = nextLevel;
         this.lexicalTopic = nextLexicalTopic;
         this.fallbackCursor = 0;
@@ -2189,6 +2337,9 @@ class QuestionBank {
     }
 
     async nextQuestion(slotOverride = null) {
+        if (this.mode === 'audio') {
+            return this._nextAudioQuestion();
+        }
         const slot = slotOverride && slotOverride.grammarTopic ? slotOverride : this._nextGrammarSlot();
         try {
             const question = await this._getGeneratedQuestion(slot);
@@ -2203,6 +2354,109 @@ class QuestionBank {
     nextLegacyQuestion(slotOverride = null) {
         const slot = slotOverride && slotOverride.grammarTopic ? slotOverride : this._nextGrammarSlot();
         return this._fallbackQuestion(slot);
+    }
+
+    async _nextAudioQuestion() {
+        try {
+            const question = await this._getAudioQuestion();
+            if (question) return question;
+        } catch (error) {
+            console.warn('AI audio question fallback:', error);
+        }
+
+        return this._fallbackAudioQuestion();
+    }
+
+    async _getAudioQuestion() {
+        const key = this._audioKey();
+        const pool = await this._ensureAudioPool();
+        if (!pool || pool.length === 0) return null;
+
+        const raw = pool.shift();
+        const formatted = this._formatAudioQuestion(raw);
+        const used = this.usedDisplays[key] || new Set();
+        used.add(raw.audioText || raw.display);
+        this.usedDisplays[key] = used;
+        return formatted;
+    }
+
+    async _ensureAudioPool() {
+        const key = this._audioKey();
+        const pool = this.questionPool[key];
+        if (pool && pool.length > 0) return pool;
+
+        if (this.fetching[key]) return this.fetching[key];
+
+        this.fetching[key] = this._fetchAudioQuestions()
+            .catch((error) => {
+                console.warn('Не удалось загрузить аудио-вопросы:', error);
+                return [];
+            })
+            .then((result) => {
+                delete this.fetching[key];
+                return result;
+            }, (error) => {
+                delete this.fetching[key];
+                throw error;
+            });
+
+        return this.fetching[key];
+    }
+
+    async _fetchAudioQuestions() {
+        const key = this._audioKey();
+        const seen = Array.from(this.usedDisplays[key] || []).slice(-12);
+        const response = await fetch('/api/generate-audio-questions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                level: this.level,
+                lexicalTopic: this.lexicalTopic,
+                count: 10,
+                exclude: seen
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const valid = (data.questions || []).filter((question) => this._isValidAudioQuestion(question));
+        if (!valid.length) return [];
+
+        const pool = [...(this.questionPool[key] || []), ...shuffle(valid)];
+        this.questionPool[key] = pool;
+        return pool;
+    }
+
+    _formatAudioQuestion(rawQuestion) {
+        const correctAnswer = rawQuestion.options[rawQuestion.correct];
+        const options = shuffle(rawQuestion.options);
+
+        return {
+            mode: 'audio',
+            level: rawQuestion.level || this.level,
+            topic: 'Аудио · ' + (this.lexicalTopic || rawQuestion.topic || 'Deutsch'),
+            text: rawQuestion.text || 'Прослушай немецкое предложение и выбери точный русский перевод.',
+            display: rawQuestion.display || 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+            audioText: rawQuestion.audioText,
+            lexicalTopic: this.lexicalTopic,
+            options,
+            correctIndex: options.indexOf(correctAnswer),
+            generated: Boolean(rawQuestion.generated !== false),
+            _poolKey: this._audioKey(),
+            _rawQuestion: rawQuestion
+        };
+    }
+
+    _fallbackAudioQuestion() {
+        const maxRank = LEVEL_RANK[this.level] || LEVEL_RANK.A2;
+        const candidates = AUDIO_QUESTION_POOL.filter((question) => LEVEL_RANK[question.level] <= maxRank);
+        const source = candidates.length ? candidates : AUDIO_QUESTION_POOL;
+        const raw = source[this.fallbackCursor % source.length];
+        this.fallbackCursor += 1;
+        return this._formatAudioQuestion({ ...raw, generated: false });
     }
 
     async _getGeneratedQuestion(slot) {
@@ -2368,6 +2622,14 @@ class QuestionBank {
         return `${this.poolSignature}:${bridge}:${slot.grammarTopic}:${slot.isWortstellung ? 'w' : 'g'}`;
     }
 
+    _audioKey() {
+        return `${this.poolSignature}:audio`;
+    }
+
+    _isValidAudioQuestion(question) {
+        return Boolean(this._isValidQuestion(question) && typeof question.audioText === 'string' && question.audioText.trim());
+    }
+
     _isValidQuestion(question) {
         return Boolean(
             question &&
@@ -2436,6 +2698,7 @@ function loadLearningState() {
     const raw = localStorage.getItem(LEARNING_STORAGE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw);
+    if (saved.mode === 'audio' || saved.mode === 'grammar') state.learning.mode = saved.mode;
     if (LANGUAGE_LEVELS.includes(saved.level)) state.learning.level = saved.level;
     if (LEXICAL_TOPICS.includes(saved.lexicalTopic)) state.learning.lexicalTopic = saved.lexicalTopic;
     if (Array.isArray(saved.grammarSlots)) {
@@ -2462,6 +2725,7 @@ function saveLearningState() {
   try {
     localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify({
       level: state.learning.level,
+      mode: state.learning.mode,
       lexicalTopic: state.learning.lexicalTopic,
       selectedSlotIndex: state.learning.selectedSlotIndex,
       grammarSlots: state.learning.grammarSlots.map(slot => ({
@@ -2476,6 +2740,7 @@ function saveLearningState() {
 
 function configureQuestionBank() {
   state.learning.questionBank.configure({
+    mode: state.learning.mode,
     langLevel: state.learning.level,
     lexicalTopic: state.learning.lexicalTopic,
     grammarSlots: state.learning.grammarSlots,
@@ -2487,11 +2752,35 @@ function learningSlotForBonus(bonusId) {
 }
 
 function renderLearningMenu() {
+  renderLearningMode();
   renderLearningLevels();
   renderLearningLexical();
   renderLearningSlots();
   renderGrammarPicker();
   updateLearningStartButton();
+}
+
+function renderLearningMode() {
+  const root = document.getElementById('mode-buttons');
+  if (!root) return;
+  root.innerHTML = '';
+  for (const mode of LEARNING_MODES) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = state.learning.mode === mode.id ? 'selected' : '';
+    button.innerHTML = `<b>${escapeHtml(mode.title)}</b><br><span>${escapeHtml(mode.desc)}</span>`;
+    button.addEventListener('click', () => {
+      state.learning.mode = mode.id;
+      state.selectedTileId = null;
+      state.learning.currentQuiz = null;
+      configureQuestionBank();
+      saveLearningState();
+      updateQuestionBanner();
+      renderLearningMenu();
+      renderBonusBar();
+    });
+    root.appendChild(button);
+  }
 }
 
 function renderLearningLevels() {
@@ -2529,6 +2818,7 @@ function renderLearningLexical() {
       configureQuestionBank();
       saveLearningState();
       renderLearningLexical();
+      renderBonusBar();
       updateLearningStartButton();
     });
     root.appendChild(button);
@@ -2538,7 +2828,13 @@ function renderLearningLexical() {
 function renderLearningSlots() {
   const root = document.getElementById('bonus-topic-slots');
   if (!root) return;
+  const section = root.closest('.learning-section');
+  if (section) section.style.display = state.learning.mode === 'audio' ? 'none' : '';
   root.innerHTML = '';
+  if (state.learning.mode === 'audio') {
+    renderBonusBar();
+    return;
+  }
   BONUS_CATEGORIES.forEach((cat, index) => {
     const slot = state.learning.grammarSlots[index];
     const button = document.createElement('button');
@@ -2561,7 +2857,10 @@ function renderLearningSlots() {
 function renderGrammarPicker() {
   const root = document.getElementById('grammar-picker');
   if (!root) return;
+  const section = root.closest('.learning-section');
+  if (section) section.style.display = state.learning.mode === 'audio' ? 'none' : '';
   root.innerHTML = '';
+  if (state.learning.mode === 'audio') return;
   const activeIndex = state.learning.selectedSlotIndex || 0;
   const activeTopic = state.learning.grammarSlots[activeIndex]?.grammarTopic;
   for (const topic of GRAMMAR_TOPICS) {
@@ -2587,17 +2886,20 @@ function renderGrammarPicker() {
 function updateLearningStartButton() {
   const startBtn = document.getElementById('start-btn');
   const status = document.getElementById('learning-status');
+  const grammarReady = state.learning.grammarSlots.length === BONUS_CATEGORIES.length &&
+    state.learning.grammarSlots.every(slot => slot && slot.grammarTopic);
   const ready = Boolean(
     state.learning.assetsReady &&
     state.learning.level &&
     state.learning.lexicalTopic &&
-    state.learning.grammarSlots.length === BONUS_CATEGORIES.length &&
-    state.learning.grammarSlots.every(slot => slot && slot.grammarTopic)
+    (state.learning.mode === 'audio' || grammarReady)
   );
   if (startBtn) startBtn.disabled = !ready;
   if (status) {
     status.textContent = state.learning.assetsReady
-      ? (ready ? '??????: ???? ?? ?????? ? ???? ??????? ??????.' : '????????? ???? ???? ???? ???????.')
+      ? (ready
+          ? (state.learning.mode === 'audio' ? 'Готово: слушай фразу и бей по точному переводу.' : 'Готово: бей по яблоку с правильным ответом.')
+          : 'Выбери уровень, лексику и режим.')
       : '???????? ???????...';
   }
 }
@@ -2634,10 +2936,13 @@ function renderBonusBar() {
     title.textContent = tile.title;
     el.appendChild(title);
     const slot = learningSlotForBonus(tile.id);
-    if (slot && slot.grammarTopic) {
+    const topicText = state.learning.mode === 'audio'
+      ? ('Аудио: ' + state.learning.lexicalTopic)
+      : (slot && slot.grammarTopic);
+    if (topicText) {
       const topic = document.createElement('div');
       topic.className = 'topic';
-      topic.textContent = slot.grammarTopic;
+      topic.textContent = topicText;
       el.appendChild(topic);
     }
     const subs = document.createElement('div');
@@ -2736,8 +3041,9 @@ function updateQuestionBanner(feedback = '') {
     const tile = state.bonusTiles.find(t => t.id === state.selectedTileId);
     el.innerHTML =
       `<div class="qb-topic">${escapeHtml(tile ? tile.title : 'Бонус')}</div>` +
-      `<div class="qb-display">Генерирую вопрос...</div>`;
+      `<div class="qb-display">${state.learning.mode === 'audio' ? 'Генерирую аудио-вопрос...' : 'Генерирую вопрос...'}</div>`;
     el.classList.add('on');
+    updateAudioReplayButton();
     return;
   }
 
@@ -2745,6 +3051,7 @@ function updateQuestionBanner(feedback = '') {
   if (!quiz || !quiz.question) {
     el.classList.remove('on');
     el.innerHTML = '';
+    updateAudioReplayButton();
     return;
   }
 
@@ -2756,6 +3063,7 @@ function updateQuestionBanner(feedback = '') {
     `<div class="qb-display">${escapeHtml(question.display)}</div>` +
     (feedback ? `<div class="qb-feedback">${escapeHtml(feedback)}</div>` : '');
   el.classList.add('on');
+  updateAudioReplayButton();
 }
 
 function showQuestionMessage(message, topic = 'Квиз') {
@@ -2765,12 +3073,106 @@ function showQuestionMessage(message, topic = 'Квиз') {
     `<div class="qb-topic">${escapeHtml(topic)}</div>` +
     `<div class="qb-display">${escapeHtml(message)}</div>`;
   el.classList.add('on');
+  updateAudioReplayButton();
 }
 
 function clearQuestionBannerSoon(delay = 900) {
   setTimeout(() => {
     if (!state.learning.currentQuiz && !state.learning.loading) updateQuestionBanner();
   }, delay);
+}
+
+const TtsPlayer = (() => {
+  const cache = new Map();
+  const CACHE_LIMIT = 40;
+  let token = 0;
+
+  function remember(text, buffer) {
+    if (cache.has(text)) cache.delete(text);
+    cache.set(text, buffer);
+    while (cache.size > CACHE_LIMIT) {
+      cache.delete(cache.keys().next().value);
+    }
+  }
+
+  function fallbackSpeech(text) {
+    if (!('speechSynthesis' in window)) {
+      flashPickReminder('Аудио недоступно. Нажми переслушать позже.');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'de-DE';
+    utter.rate = 0.88;
+    utter.pitch = 1.0;
+    const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+    const germanVoice = voices.find(voice => /^de[-_]/i.test(voice.lang || ''));
+    if (germanVoice) utter.voice = germanVoice;
+    window.speechSynthesis.speak(utter);
+  }
+
+  async function play(text) {
+    const sentence = String(text || '').trim();
+    if (!sentence) return;
+    const replay = document.getElementById('audio-replay');
+    const myToken = ++token;
+    if (replay) replay.classList.add('loading');
+    try {
+      let buffer = cache.get(sentence);
+      if (!buffer) {
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: sentence })
+        });
+        if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);
+        buffer = await response.arrayBuffer();
+        remember(sentence, buffer.slice(0));
+      }
+      if (myToken !== token) return;
+      await AudioFx.playNarration(buffer.slice(0));
+    } catch (error) {
+      console.warn('TTS fallback:', error);
+      if (myToken === token) fallbackSpeech(sentence);
+    } finally {
+      if (myToken === token && replay) replay.classList.remove('loading');
+    }
+  }
+
+  return { play };
+})();
+
+function currentAudioQuestionText() {
+  const quiz = state.learning.currentQuiz;
+  const question = quiz && quiz.question;
+  return question && question.mode === 'audio' ? question.audioText : '';
+}
+
+function updateAudioReplayButton() {
+  const replay = document.getElementById('audio-replay');
+  if (!replay) return;
+  const startEl = document.getElementById('start');
+  const startVisible = startEl && startEl.style.display !== 'none';
+  replay.classList.toggle('on', Boolean(currentAudioQuestionText()) && !state.learning.loading && !startVisible);
+}
+
+function playCurrentAudioQuestion() {
+  const text = currentAudioQuestionText();
+  if (!text) return;
+  TtsPlayer.play(text);
+}
+
+const audioReplayButton = document.getElementById('audio-replay');
+if (audioReplayButton) {
+  const replayAudio = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    AudioFx.ensure();
+    playCurrentAudioQuestion();
+    markInput();
+  };
+  audioReplayButton.addEventListener('click', replayAudio);
+  audioReplayButton.addEventListener('touchstart', replayAudio, { passive: false });
 }
 
 async function startBonusQuestion(tileId) {
@@ -2797,6 +3199,7 @@ async function startBonusQuestion(tileId) {
     _nextAppleLabel = 1;
     respawnApple();
     updateQuestionBanner();
+    if (question.mode === 'audio') playCurrentAudioQuestion();
   } catch (error) {
     console.warn('Question start failed:', error);
     flashPickReminder('Вопрос не загрузился, попробуй ещё раз.');
@@ -3025,7 +3428,7 @@ function applySubEffect(subId) {
       _autoCounter.x = 0; _autoCounter.y = 0;
       state.wave.tunnel = 0;
       state.wave.hiccupCooldown = 6.0;
-      state.promille = Math.max(0, state.promille * 0.6);
+      state.promille = Math.max(0, state.promille - 50);
       applyPromilleUi();
       break;
     case 'schild':
@@ -3531,7 +3934,7 @@ function isHudTarget(t) {
                t.closest('#start') || t.closest('#bonus-bar') ||
                t.closest('#sub-picker') || t.closest('#ammo') ||
                t.closest('#session-end') || t.closest('#promille-meter') ||
-               t.closest('#view-nudge') ||
+               t.closest('#view-nudge') || t.closest('#audio-replay') ||
                t.tagName === 'BUTTON');
 }
 window.addEventListener('mousedown', e => {
@@ -4854,7 +5257,7 @@ function tickWave(realDt) {
     state.promille = 0;
   } else {
     const waveBonus = (state.wave.num - 2) * 0.12;
-    state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus));
+    state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus) * 0.5);
   }
   applyPromilleUi();
   updateWaveTag();
@@ -5011,7 +5414,7 @@ function bumpPromilleMiss() {
   // Waves 1-3 don't penalise misses. Wave 1 is fully sober; waves 2-3
   // let promille creep over time but skip the +10 spike on each miss.
   if (state.wave.num < 4) return;
-  state.promille = Math.min(100, state.promille + 10);
+  state.promille = Math.min(100, state.promille + 4);
   applyPromilleUi();
 }
 function effectivePromilleMul() {
