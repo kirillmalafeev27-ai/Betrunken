@@ -2996,7 +2996,7 @@ function renderBonusBar() {
         // attempt that finishZinsenPending would otherwise trigger.
         // Zinsen grants TWO free picks on the second tile (one extra
         // pick on top of the usual one), so pass picks=2.
-        openSubPicker(tile.id, 2);
+        openSubPicker(tile.id, 2, true);
         state.fx.zinsenPending = false;
         document.body.classList.remove('zinsen');
         const p = document.getElementById('zinsen-prompt');
@@ -3287,11 +3287,13 @@ function availableSubs(tile) {
 
 let _pickerTile = null;
 let _pickerRemaining = 0;
-function openSubPicker(tileId, picks = 1) {
+let _pickerFree = false;
+function openSubPicker(tileId, picks = 1, free = false) {
   const tile = state.bonusTiles.find(t => t.id === tileId);
   if (!tile) return false;
   _pickerTile = tile;
   _pickerRemaining = Math.max(1, picks | 0);
+  _pickerFree = Boolean(free);
   renderSubPicker();
   document.getElementById('sub-picker').classList.add('on');
   // Release pointer lock so the player can click the options.
@@ -3303,7 +3305,7 @@ function renderSubPicker() {
   if (!tile) return;
   const opts = document.getElementById('sp-options');
   const titleEl = document.getElementById('sp-title');
-  const suffix = _pickerRemaining > 1 ? ' · ОСТАЛОСЬ ВЫБОРОВ: ' + _pickerRemaining : '';
+  const suffix = (_pickerRemaining > 1 ? ' · ОСТАЛОСЬ ВЫБОРОВ: ' + _pickerRemaining : '') + (_pickerFree ? ' · БЕСПЛАТНО' : '');
   titleEl.textContent = 'БОНУС: ' + tile.title.toUpperCase() + suffix;
   opts.innerHTML = '';
   for (let i = 0; i < tile.subs.length; i++) {
@@ -3312,20 +3314,20 @@ function renderSubPicker() {
     const live = subLiveOpacity(tile, i) >= 0.4;
     const canAfford = state.euros >= price;
     const streakOk = !sub.requiresStreak || state.streak >= sub.requiresStreak;
-    // Time OR money grants entry — either gate keeps access alive.
-    const buyable = streakOk && (live || canAfford);
+    // Time OR money grants entry; Zinsen's follow-up picks bypass the price gate.
+    const buyable = streakOk && (_pickerFree || live || canAfford);
     const b = document.createElement('button');
     b.className = 'opt';
     if (!live) b.classList.add('expired');
     if (!buyable) b.classList.add('disabled');
     b.type = 'button';
     const tagBits = [];
-    tagBits.push(live ? 'В НАЛИЧИИ' : (canAfford ? 'ПО ЕВРО' : 'ИСТЁК'));
+    tagBits.push(_pickerFree ? 'БЕСПЛАТНО' : (live ? 'В НАЛИЧИИ' : (canAfford ? 'ПО ЕВРО' : 'ИСТЁК')));
     if (sub.requiresStreak) tagBits.push('СЕРИЯ ≥ ' + sub.requiresStreak);
     b.innerHTML =
       '<div class="row">' +
         '<div class="name">' + sub.name + '</div>' +
-        '<div class="price">€' + price + '</div>' +
+        '<div class="price">' + (_pickerFree ? '€0' : '€' + price) + '</div>' +
       '</div>' +
       '<div class="desc">' + sub.desc + '</div>' +
       '<div class="tag">' + tagBits.join(' · ') + '</div>';
@@ -3336,12 +3338,11 @@ function renderSubPicker() {
         if (sub.requiresStreak && state.streak < sub.requiresStreak) return;
         const stillLive = subLiveOpacity(tile, i) >= 0.4;
         const stillAfford = state.euros >= price;
-        if (!stillLive && !stillAfford) return;
-        // Euros are always deducted (can go negative when only the time
-        // gate covered the purchase — that's just a spend tally).
-        state.euros -= price;
+        if (!_pickerFree && !stillLive && !stillAfford) return;
+        const paid = _pickerFree ? 0 : price;
+        if (!_pickerFree) state.euros -= price;
         updateStats();
-        state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t, paid: price });
+        state.claimedSubs.push({ tileId: tile.id, subId: sub.id, t: state.t, paid });
         // Consume one sub-quad from the tile if there's stock to consume.
         if (tile.t > 0) tile.t = Math.max(0, tile.t - 1);
         applySubEffect(sub.id);
