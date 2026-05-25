@@ -281,52 +281,26 @@ function buildRussianDistractors(correct, allPairs) {
   };
 
   const pairRules = [
-    ['я', 'мы'], ['мы', 'я'], ['ты', 'вы'], ['вы', 'ты'],
-    ['он', 'она'], ['она', 'он'], ['они', 'мы'],
-    ['мой', 'твой'], ['моя', 'твоя'], ['мое', 'твое'], ['мои', 'твои'],
-    ['наш', 'ваш'], ['наша', 'ваша'], ['сегодня', 'завтра'],
-    ['завтра', 'сегодня'], ['вчера', 'сегодня'], ['утром', 'вечером'],
-    ['вечером', 'утром'], ['сейчас', 'позже'], ['рано', 'поздно'],
-    ['поздно', 'рано'], ['часто', 'редко'], ['редко', 'часто'],
-    ['всегда', 'иногда'], ['иногда', 'всегда'], ['может', 'должен'],
+    ['может', 'должен'],
     ['должен', 'может'], ['можем', 'должны'], ['должны', 'можем'],
     ['хочет', 'должен'], ['хочу', 'должен'], ['нужно', 'можно'],
-    ['можно', 'нужно'], ['домой', 'на работу'], ['дома', 'на работе'],
-    ['в школе', 'в офисе'], ['в офисе', 'в школе'], ['в городе', 'за городом'],
-    ['быстро', 'медленно'], ['медленно', 'быстро'], ['хорошо', 'плохо'],
-    ['плохо', 'хорошо'], ['большой', 'маленький'], ['маленький', 'большой'],
+    ['можно', 'нужно'],
+    ['покупаю', 'продаю'], ['купить', 'продать'], ['купил', 'продал'],
+    ['прибывает', 'отправляется'], ['пришел', 'ушел'], ['пришла', 'ушла'],
+    ['оставил', 'положил'], ['оставила', 'положила'], ['стоит', 'лежит'],
+    ['лежит', 'стоит'], ['поставил', 'положил'], ['положил', 'поставил'],
+    ['знаю', 'умею'], ['умею', 'знаю'], ['получил', 'стал'], ['получила', 'стала'],
+    ['к врачу', 'в аптеку'], ['в аптеку', 'к врачу'], ['на столе', 'в столе'],
+    ['в городе', 'за городом'], ['к станции', 'на станции'], ['на станции', 'к станции'],
   ];
 
   for (const [from, to] of pairRules) add(replaceFirstWordPair(base, from, to));
-
-  if (/\bне\b/iu.test(base)) {
-    add(base.replace(/(^|[\s,.;:!?("«])не\s+/iu, '$1'));
-  } else {
-    add(base.replace(/^(\S+)/u, '$1 не'));
-  }
-
-  if (!/[.!?]$/.test(base)) {
-    add(base + ' сегодня.');
-    add(base + ' завтра.');
-  } else {
-    add(base.replace(/[.!?]$/u, ' сегодня.'));
-    add(base.replace(/[.!?]$/u, ' завтра.'));
-  }
 
   const neighbors = (allPairs || [])
     .map((pair) => pair.ru)
     .filter(Boolean)
     .sort((a, b) => Math.abs(a.length - base.length) - Math.abs(b.length - base.length));
   for (const neighbor of neighbors) add(neighbor);
-
-  const generic = [
-    'Он делает это завтра, а не сегодня.',
-    'Мы говорим об этом позже.',
-    'Она не согласна с этим решением.',
-    'Я выбираю другой вариант.',
-    'Они уже закончили эту работу.',
-  ];
-  for (const value of generic) add(value);
 
   return options.slice(0, 3);
 }
@@ -353,6 +327,60 @@ function formatAudioQuestion(pair, allPairs, level, lexicalTopic) {
   };
 }
 
+function normalizeAudioQuestion(raw, level, lexicalTopic) {
+  if (!raw || typeof raw !== 'object') return null;
+  const audioText = stripOuterQuotes(raw.audioText || raw.audio || raw.de || raw.satz || raw.sentence);
+  if (!audioText || /[А-Яа-яЁё]/.test(audioText)) return null;
+
+  const options = Array.isArray(raw.options)
+    ? raw.options.map((option) => stripOuterQuotes(option)).filter(Boolean)
+    : [];
+  if (options.length !== 4) return null;
+  if (options.some((option) => !/[А-Яа-яЁё]/.test(option))) return null;
+
+  let correct;
+  if (typeof raw.correct === 'number') {
+    correct = raw.correct;
+  } else if (/^[0-3]$/.test(String(raw.correct || '').trim())) {
+    correct = Number(String(raw.correct).trim());
+  } else {
+    correct = answerLetterToIndex(raw.correct);
+  }
+  if (correct < 0 && raw.correctAnswer) {
+    const correctAnswer = normalizeAnswerText(raw.correctAnswer);
+    correct = options.findIndex((option) => normalizeAnswerText(option) === correctAnswer);
+  }
+  if (!Number.isInteger(correct) || correct < 0 || correct > 3) return null;
+
+  const uniqueOptions = new Set(options.map(normalizeAnswerText));
+  if (uniqueOptions.size !== 4) return null;
+
+  const q = {
+    mode: 'audio',
+    level,
+    topic: lexicalTopic || 'Audio',
+    text: raw.text || 'Прослушай немецкое предложение и выбери точный русский перевод.',
+    display: raw.display || 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
+    audioText,
+    options,
+    correct
+  };
+
+  return isValidAudioQuestion(q) ? q : null;
+}
+
+function parseJsonAudioQuestions(rawText, expectedCount, level, lexicalTopic) {
+  const text = String(rawText || '').trim();
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  const jsonStr = jsonMatch ? jsonMatch[0] : text;
+  const parsed = JSON.parse(jsonStr);
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((item) => normalizeAudioQuestion(item, level, lexicalTopic))
+    .filter(Boolean)
+    .slice(0, expectedCount);
+}
+
 function isValidAudioQuestion(q) {
   return isValidQuestion(q) && typeof q.audioText === 'string' && q.audioText.trim().length > 0;
 }
@@ -362,20 +390,41 @@ function buildAudioPrompt({ level, lexicalTopic, questionsCount, exclude }) {
     ? `\nНе используй эти немецкие предложения повторно: ${exclude.slice(-12).map((item) => `"${item}"`).join(', ')}\n`
     : '';
 
-  return `Du bist ein erfahrener DaF-Lehrer.
+  return `Du bist ein erfahrener DaF-Lehrer und baust Hörverstehen-Aufgaben mit starken, fairen Distraktoren.
 
-Erstelle genau ${questionsCount} kurze deutsche Hörverstehen-Sätze mit exakter russischer Übersetzung.
+Erstelle genau ${questionsCount} kurze deutsche Hörverstehen-Aufgaben mit exakter russischer Übersetzung und drei falschen russischen Optionen.
 Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz über ${level}.
 Lexikalisches Thema: ${lexicalTopic || 'Alltag'}.
 ${excludePart}
-Regeln:
+Qualitätsregeln:
 1. Jeder deutsche Satz ist natürlich, vollständig und 6 bis 14 Wörter lang.
-2. Die russische Übersetzung ist exakt, aber kurz genug für eine Multiple-Choice-Antwort.
-3. Keine Optionen, keine Erklärungen, kein JSON, kein Markdown.
-4. Jede Zeile hat genau dieses Format:
-1. Deutscher Satz. — Русский перевод.
+2. Die richtige russische Option ist eine genaue Übersetzung des deutschen Satzes.
+3. Die drei falschen Optionen sind KEINE zufälligen Sätze und KEINE billigen Negations-/Zeitwechsel wie "сегодня/завтра", "не", "он/она", außer genau dieses Detail ist im gehörten Satz zentral und pädagogisch sinnvoll.
+4. Jede falsche Option muss eine realistische Hör-/Lernfalle sein: ähnlich klingendes oder leicht verwechselbares deutsches Wort, trennbares Präfix, Modalverb, Präposition, Kasusbeziehung, Bewegungsrichtung, false friend, Verbvalenz oder nahes Wortfeld.
+5. Die falschen Optionen behalten denselben Satzrahmen wie die richtige Option, ändern aber genau ein wichtiges Bedeutungselement. Ein Lernender soll denken können: "Das hätte ich wirklich verwechseln können."
+6. Wähle die beste Fallenart selbst. Wenn dir keine starken Distraktoren einfallen, formuliere den deutschen Satz neu.
+7. Alle vier Optionen sind auf Russisch, gleich plausibel kurz und eindeutig voneinander verschieden.
 
-Schreibe nur die ${questionsCount} Zeilen mit Original und Übersetzung.`;
+Gute Distraktor-Ideen:
+- ankommen / abfahren / umsteigen; kaufen / verkaufen / bestellen; kennen / können / wissen; bekommen / werden; stellen / legen / stehen / liegen
+- in / an / auf / zu / bei; aus / von; vor / hinter / zwischen
+- Arzt / Apotheke / Rechnung / Beratung im selben Themenfeld, wenn das gehörte Wort ähnlich oder lernertypisch verwechselbar ist
+
+Ausgabe NUR als JSON-Array, kein Markdown, keine Erklärungen:
+[
+  {
+    "audioText": "Ich hole das Rezept in der Apotheke ab.",
+    "options": [
+      "Я забираю рецепт в аптеке.",
+      "Я отдаю рецепт в аптеке.",
+      "Я забираю чек в аптеке.",
+      "Я забираю рецепт у врача."
+    ],
+    "correct": 0
+  }
+]
+
+Schreibe jetzt genau ${questionsCount} Objekte.`;
 }
 
 function putTtsCache(key, entry) {
@@ -617,14 +666,23 @@ app.post('/api/generate-audio-questions', async (req, res) => {
   }
 
   try {
-    const pairs = parseAudioPairs(text, Math.max(questionsCount, 10));
-    const valid = pairs
-      .map((pair) => formatAudioQuestion(pair, pairs, level, lexicalTopic))
-      .filter(isValidAudioQuestion);
+    let valid = [];
+    try {
+      valid = parseJsonAudioQuestions(text, Math.max(questionsCount, 10), level, lexicalTopic);
+    } catch (jsonErr) {
+      valid = [];
+    }
 
     if (!valid.length) {
-      console.error('No valid audio pairs parsed. Raw text:', text.slice(0, 500));
-      return res.status(502).json({ error: 'No valid audio pairs in LLM response' });
+      const pairs = parseAudioPairs(text, Math.max(questionsCount, 10));
+      valid = pairs
+        .map((pair) => formatAudioQuestion(pair, pairs, level, lexicalTopic))
+        .filter(isValidAudioQuestion);
+    }
+
+    if (!valid.length) {
+      console.error('No valid audio questions parsed. Raw text:', text.slice(0, 500));
+      return res.status(502).json({ error: 'No valid audio questions in LLM response' });
     }
 
     if (valid.length > questionsCount) {

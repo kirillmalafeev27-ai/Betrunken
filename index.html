@@ -326,6 +326,38 @@
     font-size: 12px;
   }
 
+  #game-notice {
+    position: absolute;
+    top: calc(50% - 92px);
+    left: 50%;
+    transform: translate(-50%, 8px) scale(0.92);
+    max-width: min(440px, calc(100vw - 28px));
+    padding: 8px 14px;
+    background: rgba(20,18,16,0.9);
+    border: 1px solid rgba(200,144,96,0.45);
+    border-radius: 8px;
+    color: #ffe0ad;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    text-align: center;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+    pointer-events: none;
+    z-index: 8;
+    opacity: 0;
+    transition: opacity 0.16s ease-out, transform 0.16s ease-out;
+  }
+  #game-notice.on {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+    box-shadow: 0 0 18px rgba(200,144,96,0.35);
+  }
+  #game-notice.danger {
+    border-color: rgba(196,74,26,0.72);
+    color: #ffb184;
+    box-shadow: 0 0 18px rgba(196,74,26,0.32);
+  }
+
   /* Bonus bar — 5 category tiles each containing a row of sub-quads.
      The rightmost sub-quad (position 1) drains first; opacity fades to 0
      as its share of the timer runs out. */
@@ -516,6 +548,79 @@
     text-align: center;
   }
   #sub-picker .balance b { color: #8fd99a; font-weight: 700; }
+
+  #tile-choice {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10,9,8,0.28);
+    backdrop-filter: blur(2px);
+    z-index: 58;
+    pointer-events: auto;
+  }
+  #tile-choice.on { display: flex; }
+  #tile-choice .panel {
+    width: min(360px, calc(100vw - 28px));
+    background: var(--panel);
+    border: 1px solid rgba(200,144,96,0.28);
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+    text-align: center;
+  }
+  #tile-choice h3 {
+    margin: 0 0 5px;
+    color: var(--accent);
+    font-size: 14px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  #tile-choice .hint {
+    margin: 0 0 12px;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  #tile-choice .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #tile-choice button {
+    border: 1px solid #3a3733;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--panel-2);
+    cursor: pointer;
+  }
+  #tile-choice button:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: #3a3733;
+  }
+  #tile-choice button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #1a1916;
+  }
+  #tile-choice button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  #tile-choice .ghost {
+    margin-top: 10px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    width: 100%;
+  }
 
   /* Euro counter in the stats card pops a little — green money. */
   #euros-line { color: #8fd99a; font-weight: 600; }
@@ -1135,6 +1240,7 @@
   <div id="crosshair"><div class="ring"></div></div>
   <div id="score-pop"></div>
   <div id="streak-pop"></div>
+  <div id="game-notice"></div>
   <div id="pick-reminder">Не стреляет? А ты выбери бонус.</div>
   <div id="question-banner"></div>
   <button id="audio-replay" type="button" title="Переслушать">↻</button>
@@ -1197,6 +1303,18 @@
       <p class="hint">Доступны только подсвеченные.</p>
       <div class="options" id="sp-options"></div>
       <button class="skip" id="sp-skip" type="button">Пропустить</button>
+    </div>
+  </div>
+
+  <div id="tile-choice">
+    <div class="panel">
+      <h3 id="tc-title">БОНУС</h3>
+      <p class="hint" id="tc-hint">Купить бонус сейчас или получить новый вопрос?</p>
+      <div class="actions">
+        <button id="tc-buy" class="secondary" type="button">Купить бонус</button>
+        <button id="tc-question" class="primary" type="button">Новый вопрос</button>
+      </div>
+      <button class="ghost" id="tc-cancel" type="button">Отмена</button>
     </div>
   </div>
 
@@ -1272,7 +1390,7 @@
   <div id="start" style="display:none">
     <div class="panel">
       <h2>BETRUNKEN</h2>
-      <p>Выбери уровень, лексику и назначь пять грамматических тем пяти бонусам. В игре клик по плашке бонуса запускает генерацию вопроса, а бонус откроется только после выстрела в правильный ответ.</p>
+      <p>Выбери уровень, лексику и назначь пять грамматических тем пяти бонусам. В игре клик по плашке бонуса открывает выбор: купить бонус сейчас или получить новый вопрос.</p>
       <div class="keys" id="keys-desktop">
         <div class="key"><b>ЛКМ</b> / <b>Space</b> — выстрел</div>
         <div class="key"><b>Мышь</b> — целиться</div>
@@ -1467,6 +1585,39 @@ const AudioFx = (() => {
     osc.stop(now + 0.16);
   }
 
+  function emptyAmmo() {
+    const ac = ensure();
+    const now = ac.currentTime;
+
+    const click = ac.createOscillator();
+    click.type = 'square';
+    click.frequency.setValueAtTime(150, now);
+    click.frequency.exponentialRampToValueAtTime(90, now + 0.055);
+    const clickGain = ac.createGain();
+    clickGain.gain.setValueAtTime(0.0, now);
+    clickGain.gain.linearRampToValueAtTime(0.22, now + 0.004);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    click.connect(clickGain).connect(ac.destination);
+    click.start(now);
+    click.stop(now + 0.1);
+
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.05, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ac.sampleRate;
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 70);
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const f = ac.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 1800;
+    const g = ac.createGain();
+    g.gain.value = 0.12;
+    src.connect(f).connect(g).connect(ac.destination);
+    src.start(now + 0.035);
+  }
+
   let narrationSource = null;
   async function playNarration(arrayBuffer) {
     const ac = ensure();
@@ -1489,7 +1640,7 @@ const AudioFx = (() => {
     return src;
   }
 
-  return { shot, miss, hit, ensure, playNarration };
+  return { shot, miss, hit, emptyAmmo, ensure, playNarration };
 })();
 
 // ---------------------------------------------------------------------------
@@ -2196,7 +2347,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Ich kaufe heute Brot und Käse.',
-        options: ['Сегодня я покупаю хлеб и сыр.', 'Завтра я покупаю хлеб и сыр.', 'Сегодня мы покупаем хлеб и сыр.', 'Сегодня я не покупаю хлеб и сыр.'],
+        options: ['Сегодня я покупаю хлеб и сыр.', 'Сегодня я продаю хлеб и сыр.', 'Сегодня я покупаю булочки и сыр.', 'Сегодня я покупаю хлеб и колбасу.'],
         correct: 0
     },
     {
@@ -2205,7 +2356,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Der Zug kommt um acht Uhr an.',
-        options: ['Поезд прибывает в восемь часов.', 'Поезд отправляется в восемь часов.', 'Автобус прибывает в восемь часов.', 'Поезд прибывает в девять часов.'],
+        options: ['Поезд прибывает в восемь часов.', 'Поезд отправляется в восемь часов.', 'Поезд прибывает на восьмой путь.', 'На поезд нужно пересесть в восемь часов.'],
         correct: 0
     },
     {
@@ -2214,7 +2365,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Wir müssen morgen früh zum Arzt gehen.',
-        options: ['Завтра рано мы должны пойти к врачу.', 'Сегодня рано мы должны пойти к врачу.', 'Завтра рано мы можем пойти к врачу.', 'Завтра вечером мы должны пойти к врачу.'],
+        options: ['Завтра рано мы должны пойти к врачу.', 'Завтра рано мы хотим пойти к врачу.', 'Завтра рано мы должны пойти в аптеку.', 'Завтра рано нам разрешено пойти к врачу.'],
         correct: 0
     },
     {
@@ -2223,7 +2374,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Sie hat den Schlüssel auf dem Tisch gelassen.',
-        options: ['Она оставила ключ на столе.', 'Он оставил ключ на столе.', 'Она оставила сумку на столе.', 'Она положила ключ под стол.'],
+        options: ['Она оставила ключ на столе.', 'Она положила ключ на стол.', 'Она оставила ключ в столе.', 'Она забыла замок на столе.'],
         correct: 0
     },
     {
@@ -2232,7 +2383,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Obwohl es regnet, gehen die Kinder nach draußen.',
-        options: ['Хотя идет дождь, дети выходят на улицу.', 'Потому что идет дождь, дети выходят на улицу.', 'Хотя идет дождь, дети остаются дома.', 'Когда идет дождь, дети выходят на улицу.'],
+        options: ['Хотя идет дождь, дети выходят на улицу.', 'Пока идет дождь, дети выходят на улицу.', 'Потому что идет дождь, дети выходят на улицу.', 'Хотя идет дождь, дети идут внутрь.'],
         correct: 0
     },
     {
@@ -2241,7 +2392,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Ich freue mich darauf, dich wiederzusehen.',
-        options: ['Я рад снова тебя увидеть.', 'Я боюсь снова тебя увидеть.', 'Я рад снова его увидеть.', 'Я рад скоро тебе написать.'],
+        options: ['Я рад снова тебя увидеть.', 'Я боюсь снова тебя увидеть.', 'Я рад снова тебя проводить.', 'Я рад снова с тобой познакомиться.'],
         correct: 0
     },
     {
@@ -2250,7 +2401,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Nachdem der Vertrag unterschrieben worden war, begann die Lieferung.',
-        options: ['После того как договор был подписан, началась поставка.', 'До того как договор был подписан, началась поставка.', 'После того как договор был подписан, закончилась поставка.', 'После того как отчет был подписан, началась поставка.'],
+        options: ['После того как договор был подписан, началась поставка.', 'После того как договор подписали, поставка была отменена.', 'После того как договор был отправлен, началась поставка.', 'После того как заявка была подписана, началась поставка.'],
         correct: 0
     },
     {
@@ -2259,7 +2410,7 @@ const AUDIO_QUESTION_POOL = [
         text: 'Прослушай немецкое предложение и выбери точный русский перевод.',
         display: 'Немецкая фраза звучит вслух. Выбери перевод на яблоке.',
         audioText: 'Je länger wir warten, desto schwieriger wird die Entscheidung.',
-        options: ['Чем дольше мы ждем, тем труднее становится решение.', 'Чем меньше мы ждем, тем труднее становится решение.', 'Чем дольше мы ждем, тем легче становится решение.', 'Чем дольше они ждут, тем труднее становится решение.'],
+        options: ['Чем дольше мы ждем, тем труднее становится решение.', 'Чем дольше мы ждем, тем труднее становится обсуждение.', 'Чем дольше мы советуемся, тем труднее становится решение.', 'Чем дольше мы ждем, тем надежнее становится решение.'],
         correct: 0
     }
 ];
@@ -3004,7 +3155,7 @@ function renderBonusBar() {
         markInput();
         return;
       }
-      startBonusQuestion(tile.id);
+      openTileChoice(tile.id);
       markInput();
     });
     bar.appendChild(el);
@@ -3033,6 +3184,22 @@ function flashPickReminder(text) {
 }
 // Kept callable from the tick loop as a no-op so existing call sites work.
 function updatePickReminder() {}
+
+let _gameNoticeTimer = null;
+function flashGameNotice(text, variant = 'warn', duration = 1400) {
+  const el = document.getElementById('game-notice');
+  if (!el) return;
+  const startEl = document.getElementById('start');
+  if (startEl && startEl.style.display !== 'none') return;
+  const se = document.getElementById('session-end');
+  if (se && se.classList.contains('on')) return;
+  el.textContent = text;
+  el.className = variant || '';
+  void el.offsetWidth;
+  el.classList.add('on');
+  clearTimeout(_gameNoticeTimer);
+  _gameNoticeTimer = setTimeout(() => el.classList.remove('on'), duration);
+}
 
 function updateQuestionBanner(feedback = '') {
   const el = document.getElementById('question-banner');
@@ -3283,6 +3450,45 @@ function availableSubs(tile) {
     if (isSubBuyable(tile, sub, i)) live.push(sub);
   }
   return live;
+}
+
+let _choiceTileId = null;
+function tileChoiceOpen() {
+  const el = document.getElementById('tile-choice');
+  return Boolean(el && el.classList.contains('on'));
+}
+function openTileChoice(tileId, mode = 'default') {
+  if (state.learning.loading) {
+    flashPickReminder('Вопрос уже готовится.');
+    return false;
+  }
+  const tile = state.bonusTiles.find(t => t.id === tileId);
+  if (!tile) return false;
+
+  _choiceTileId = tileId;
+  const panel = document.getElementById('tile-choice');
+  const title = document.getElementById('tc-title');
+  const hint = document.getElementById('tc-hint');
+  const buy = document.getElementById('tc-buy');
+  if (!panel || !title || !hint || !buy) return false;
+
+  const buyableCount = availableSubs(tile).length;
+  title.textContent = tile.title;
+  hint.textContent = mode === 'reward'
+    ? 'Бонус открыт. Купить его сейчас или сразу взять новый вопрос?'
+    : 'Купить бонус сейчас или получить новый вопрос?';
+  buy.disabled = buyableCount <= 0;
+  buy.textContent = buyableCount > 0 ? 'Купить бонус' : 'Нет доступных бонусов';
+
+  panel.classList.add('on');
+  unlockPointer();
+  return true;
+}
+function closeTileChoice() {
+  const panel = document.getElementById('tile-choice');
+  if (panel) panel.classList.remove('on');
+  _choiceTileId = null;
+  document.body.classList.add('cursor-on');
 }
 
 let _pickerTile = null;
@@ -3576,6 +3782,24 @@ document.getElementById('sp-skip').addEventListener('click', (e) => {
   closeSubPicker();
   // If the player skips while in the Zinsen second-pick mode, abandon it.
   if (state.fx.zinsenPending) finishZinsenPending();
+});
+document.getElementById('tc-buy').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  const tileId = _choiceTileId;
+  if (!tileId) return;
+  closeTileChoice();
+  openSubPicker(tileId);
+});
+document.getElementById('tc-question').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  const tileId = _choiceTileId;
+  if (!tileId) return;
+  closeTileChoice();
+  startBonusQuestion(tileId);
+});
+document.getElementById('tc-cancel').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  closeTileChoice();
 });
 
 initLearningMenu();
@@ -3882,6 +4106,7 @@ function pointerLockAllowed() {
   if (startEl && startEl.style.display !== 'none') return false;
   const sp = document.getElementById('sub-picker');
   if (sp && sp.classList.contains('on')) return false;
+  if (tileChoiceOpen()) return false;
   const se = document.getElementById('session-end');
   if (se && se.classList.contains('on')) return false;
   if (state.fx && state.fx.zinsenPending) return false;
@@ -3933,7 +4158,8 @@ function isHudTarget(t) {
   return t && (t.closest('.ctl') || t.closest('.hud-card') ||
                t.closest('#touch-controls') || t.closest('#spawn-editor') ||
                t.closest('#start') || t.closest('#bonus-bar') ||
-               t.closest('#sub-picker') || t.closest('#ammo') ||
+               t.closest('#sub-picker') || t.closest('#tile-choice') ||
+               t.closest('#ammo') ||
                t.closest('#session-end') || t.closest('#promille-meter') ||
                t.closest('#view-nudge') || t.closest('#audio-replay') ||
                t.tagName === 'BUTTON');
@@ -3956,6 +4182,7 @@ window.addEventListener('mousedown', e => {
 });
 window.addEventListener('keydown', e => {
   if (e.code === 'Escape') {
+    if (tileChoiceOpen()) closeTileChoice();
     // Force the cursor back immediately — pointerlockchange will also fire,
     // but showCursor() does both the body-class flip and the lock exit so
     // the cursor reappears even if the lock wasn't actually engaged.
@@ -4791,6 +5018,7 @@ function closeSpawnEditor() {
 function tryShoot() {
   if (!state.boltTemplate) return;
   if (!state.canShoot) return;
+  if (tileChoiceOpen()) return;
   const picker = document.getElementById('sub-picker');
   if (picker && picker.classList.contains('on')) return;
   const se = document.getElementById('session-end');
@@ -4801,7 +5029,11 @@ function tryShoot() {
   // Köcher: while > 0, this shot doesn't cost a bolt. Decrement the counter
   // instead. If no quiver and no free shots, just bail with the miss SFX.
   const kocherFree = state.fx.kocherShots > 0;
-  if (!kocherFree && state.boltsLeft <= 0) { AudioFx.miss(); return; }
+  if (!kocherFree && state.boltsLeft <= 0) {
+    AudioFx.emptyAmmo();
+    flashGameNotice('Боекомплект пуст. Жди перезарядку.', 'danger');
+    return;
+  }
   if (kocherFree) state.fx.kocherShots--;
   else            state.boltsLeft--;
   state.lastShotTime = state.t;
@@ -4959,6 +5191,7 @@ function tryShoot() {
       hitZone,
       hitPoints,
       resolved: false,
+      ghostNoticePlayed: false,
     });
   }
   // Leuchtspur is wave-bound; not consumed per shot.
@@ -4985,6 +5218,15 @@ function getAimRayDir() {
   // returns the camera's forward direction, which is what the bolt should follow.
   _raycaster.setFromCamera({ x: 0, y: 0 }, camera);
   return _raycaster.ray.direction.clone();
+}
+
+function segmentHitsSphere(from, to, center, radius) {
+  const seg = to.clone().sub(from);
+  const lenSq = seg.lengthSq();
+  if (lenSq <= 1e-8) return false;
+  const t = Math.max(0, Math.min(1, center.clone().sub(from).dot(seg) / lenSq));
+  const closest = from.clone().add(seg.multiplyScalar(t));
+  return closest.distanceToSquared(center) <= radius * radius;
 }
 
 function resolveQuizAnswerHit(b, appleIndex, apple) {
@@ -5040,10 +5282,9 @@ function resolveQuizAnswerHit(b, appleIndex, apple) {
     _nextAppleLabel = 1;
     respawnApple();
     if (state.selectedTileId === armedTile) {
-      const sp = document.getElementById('sub-picker');
-      if (!sp || !sp.classList.contains('on')) openSubPicker(armedTile);
+      openTileChoice(armedTile, 'reward');
+      state.selectedTileId = null;
     }
-    if (state.selectedTileId === armedTile) state.selectedTileId = null;
     renderBonusBar();
     clearQuestionBannerSoon(650);
   }, 650);
@@ -5686,6 +5927,16 @@ function tick() {
     }
     const step = b.dir.clone().multiplyScalar(b.speed * dt);
     const next = b.pos.clone().add(step);
+    if (!b.ghostNoticePlayed) {
+      for (const apple of state.apples) {
+        if (!apple.isGhost) continue;
+        if (segmentHitsSphere(b.pos, next, apple.hitbox.center, apple.hitbox.radius)) {
+          b.ghostNoticePlayed = true;
+          flashGameNotice('Болт пролетел сквозь яблоко. Оно не настоящее.', 'danger', 1800);
+          break;
+        }
+      }
+    }
     // Resolve hit if we cross the hit point.
     if (b.willHit && !b.resolved && b.hitPoint) {
       const before = b.pos.clone().sub(b.hitPoint).dot(b.dir);
@@ -5770,6 +6021,7 @@ function tick() {
         b.missPlayed = true;
         state.streak = 0;
         onBonusMiss();
+        flashGameNotice('Тебя шатает ещё больше при промахе.', 'danger', 1600);
         // Glückschuss soaks up to two miss-promille penalties.
         if (state.fx.glueckShots > 0) state.fx.glueckShots--;
         else                          bumpPromilleMiss();
