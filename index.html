@@ -5967,8 +5967,6 @@ function tick() {
             // Economy reward: zone-based euros credited to the player's balance.
             const eur = EUR_REWARD_BY_ZONE[b.hitZone] || 0;
             state.euros += eur;
-            state.streak++;
-            if (state.streak > state.bestStreak) state.bestStreak = state.streak;
             state.lastZone = b.hitZone;
             state.lastZoneAt = state.t;
             updateStats();
@@ -5977,7 +5975,6 @@ function tick() {
             shatterApple(b.hitAppleIdx, b.hitPoint, b.dir);
             onBonusHit();
             bumpPromilleHit(b.hitZone);
-            if (state.streak >= 2) showStreakPop(state.streak);
             if (state.selectedTileId) {
               // Open the picker a beat AFTER the hit so the shatter +
               // score pop have time to read before the modal interrupts.
@@ -6019,7 +6016,6 @@ function tick() {
       if (!b.willHit) {
         AudioFx.miss();
         b.missPlayed = true;
-        state.streak = 0;
         onBonusMiss();
         flashGameNotice('Тебя шатает ещё больше при промахе.', 'danger', 1600);
         // Glückschuss soaks up to two miss-promille penalties.
