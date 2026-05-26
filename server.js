@@ -390,27 +390,22 @@ function buildAudioPrompt({ level, lexicalTopic, questionsCount, exclude }) {
     ? `\nНе используй эти немецкие предложения повторно: ${exclude.slice(-12).map((item) => `"${item}"`).join(', ')}\n`
     : '';
 
-  return `Du bist ein erfahrener DaF-Lehrer und baust Hörverstehen-Aufgaben mit starken, fairen Distraktoren.
+  return `Du bist ein erfahrener DaF-Lehrer und baust Hoerverstehen-Aufgaben mit starken, fairen Distraktoren.
 
-Erstelle genau ${questionsCount} kurze deutsche Hörverstehen-Aufgaben mit exakter russischer Übersetzung und drei falschen russischen Optionen.
-Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz über ${level}.
+Erstelle genau ${questionsCount} kurze deutsche Hoerverstehen-Aufgaben mit exakter russischer Uebersetzung und drei falschen russischen Optionen.
+Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz ueber ${level}.
 Lexikalisches Thema: ${lexicalTopic || 'Alltag'}.
 ${excludePart}
-Qualitätsregeln:
-1. Jeder deutsche Satz ist natürlich, vollständig und 6 bis 14 Wörter lang.
-2. Die richtige russische Option ist eine genaue Übersetzung des deutschen Satzes.
-3. Die drei falschen Optionen sind KEINE zufälligen Sätze und KEINE billigen Negations-/Zeitwechsel wie "сегодня/завтра", "не", "он/она", außer genau dieses Detail ist im gehörten Satz zentral und pädagogisch sinnvoll.
-4. Jede falsche Option muss eine realistische Hör-/Lernfalle sein: ähnlich klingendes oder leicht verwechselbares deutsches Wort, trennbares Präfix, Modalverb, Präposition, Kasusbeziehung, Bewegungsrichtung, false friend, Verbvalenz oder nahes Wortfeld.
-5. Die falschen Optionen behalten denselben Satzrahmen wie die richtige Option, ändern aber genau ein wichtiges Bedeutungselement. Ein Lernender soll denken können: "Das hätte ich wirklich verwechseln können."
-6. Wähle die beste Fallenart selbst. Wenn dir keine starken Distraktoren einfallen, formuliere den deutschen Satz neu.
+Qualitaetsregeln:
+1. Jeder deutsche Satz ist natuerlich, vollstaendig und 6 bis 14 Woerter lang.
+2. Die richtige russische Option ist eine genaue Uebersetzung des deutschen Satzes.
+3. Die drei falschen Optionen sind KEINE zufaelligen Saetze und KEINE billigen Negations-/Zeitwechsel.
+4. Jede falsche Option muss eine realistische Hoer-/Lernfalle sein: aehnlich klingendes oder leicht verwechselbares deutsches Wort, trennbares Praefix, Modalverb, Praeposition, Kasusbeziehung, Bewegungsrichtung, false friend, Verbvalenz oder nahes Wortfeld.
+5. Die falschen Optionen behalten denselben Satzrahmen wie die richtige Option, aendern aber genau ein wichtiges Bedeutungselement.
+6. Waehle die beste Fallenart selbst. Wenn dir keine starken Distraktoren einfallen, formuliere den deutschen Satz neu.
 7. Alle vier Optionen sind auf Russisch, gleich plausibel kurz und eindeutig voneinander verschieden.
 
-Gute Distraktor-Ideen:
-- ankommen / abfahren / umsteigen; kaufen / verkaufen / bestellen; kennen / können / wissen; bekommen / werden; stellen / legen / stehen / liegen
-- in / an / auf / zu / bei; aus / von; vor / hinter / zwischen
-- Arzt / Apotheke / Rechnung / Beratung im selben Themenfeld, wenn das gehörte Wort ähnlich oder lernertypisch verwechselbar ist
-
-Ausgabe NUR als JSON-Array, kein Markdown, keine Erklärungen:
+Ausgabe NUR als JSON-Array, kein Markdown, keine Erklaerungen:
 [
   {
     "audioText": "Ich hole das Rezept in der Apotheke ab.",
