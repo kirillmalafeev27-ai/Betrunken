@@ -2108,20 +2108,22 @@ function showScorePop(points, zone) {
 // Each tile lists its subs LEFT→RIGHT. Position 1 = RIGHTMOST sub-quad and
 // drains first when the timer runs out. The number printed in each comment
 // matches the position notation in the design doc.
+const SHORT_BONUS_DURATION_SEC = 45;
+
 const BONUS_CATEGORIES = [
   { id: 'breath', title: 'Дыхание', subs: [
-      { id: 'zeitlupe', pos: 3, name: 'Zeitlupe',      desc: 'мир ×0.5 на 15 сек' },
-      { id: 'anker',    pos: 2, name: 'Anker',         desc: 'шатание только по одной оси на 1 выстрел' },
-      { id: 'atem',     pos: 1, name: 'Atem anhalten', desc: '−50% опьянения и дрейфа на 15 сек' },
+      { id: 'zeitlupe', pos: 3, name: 'Zeitlupe',      desc: `мир ×0.5 на ${SHORT_BONUS_DURATION_SEC} сек` },
+      { id: 'anker',    pos: 2, name: 'Anker',         desc: `шатание только по одной оси на ${SHORT_BONUS_DURATION_SEC} сек` },
+      { id: 'atem',     pos: 1, name: 'Atem anhalten', desc: `−50% опьянения и дрейфа на ${SHORT_BONUS_DURATION_SEC} сек` },
   ]},
   { id: 'aim', title: 'Прицел', subs: [
       { id: 'leuchtspur', pos: 4, name: 'Leuchtspur', desc: 'до конца волны: трасса болта пунктиром' },
       { id: 'zoom',       pos: 3, name: 'Zoom',       desc: 'до конца волны: приближение, выше точность' },
       { id: 'magnet',     pos: 2, name: 'Magnet',     desc: 'до конца волны: болт магнитится к близкому яблоку в полёте' },
-      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: 'все яблоки ×1.5 на 8 секунд' },
+      { id: 'adlerauge',  pos: 1, name: 'Adlerauge',  desc: `все яблоки ×1.5 на ${SHORT_BONUS_DURATION_SEC} сек` },
   ]},
   { id: 'res', title: 'Ресурсы', subs: [
-      { id: 'schnaps', pos: 3, name: 'Schnaps', desc: '+опьянение, но возвращает камеру к точке прицела' },
+      { id: 'schnaps', pos: 3, name: 'Schnaps', desc: `мгновенно возвращает камеру к прицелу; +опьянение на ${SHORT_BONUS_DURATION_SEC} сек` },
       { id: 'kocher',  pos: 2, name: 'Köcher',   desc: 'следующие 2 выстрела не тратят болты' },
       { id: 'zinsen',  pos: 1, name: 'Zinsen',  desc: 'после следующего попадания — выбери ещё 2 бонуса с любой плитки' },
   ]},
@@ -4026,24 +4028,24 @@ function applySubEffect(subId) {
   const fx = state.fx;
   switch (subId) {
     case 'zeitlupe':
-      // 15 s of 0.5× slow-motion. Fires immediately on claim — no RMB hold.
-      fx.zeitlupe = 15.0;
+      // Shared 45 s duration for every formerly short timed bonus.
+      fx.zeitlupe = SHORT_BONUS_DURATION_SEC;
       fx.zeitlupeReady = false;
       break;
     case 'anker':
-      // Treated as a 4 s window the player can fire within; suppresses
+      // Timed window the player can fire within; suppresses
       // shake on one axis the entire time.
-      fx.ankerSh = 4.0;
+      fx.ankerSh = SHORT_BONUS_DURATION_SEC;
       if (Math.random() < 0.5) { fx.ankerLockH = true; fx.ankerLockV = false; }
       else                    { fx.ankerLockV = true; fx.ankerLockH = false; }
       break;
-    case 'atem':    fx.atem = 15.0; break;
+    case 'atem':    fx.atem = SHORT_BONUS_DURATION_SEC; break;
     case 'adlerauge':
-      // All apples get ×1.5 for 8 seconds. Visual scale + hitbox bump are
+      // All apples get ×1.5 for the shared timed-bonus duration. Visual scale + hitbox bump are
       // applied immediately and reverted when the timer expires in
       // tickFxTimers.
       if (fx.adlerSec <= 0) setAdlerVisual(true);
-      fx.adlerSec = 8.0;
+      fx.adlerSec = SHORT_BONUS_DURATION_SEC;
       break;
     // Aim-category effects (except Adlerauge) now last until the wave
     // changes — the value 1 here is just a flag, not a counter. Cleared
@@ -4061,7 +4063,7 @@ function applySubEffect(subId) {
       // Bumps drunkenness AND returns the camera to the aim point by
       // wiping the accumulated hiccup displacement / velocity. Risky
       // trade: stronger jitter for a frame-perfect reset of the view.
-      fx.schnaps = 5.0;
+      fx.schnaps = SHORT_BONUS_DURATION_SEC;
       state.wave.hiccupX = 0; state.wave.hiccupY = 0;
       state.wave.hiccupVelX = 0; state.wave.hiccupVelY = 0;
       _viewNudge.x = 0; _viewNudge.y = 0;
@@ -4267,10 +4269,10 @@ function tickFxTimers(realDt) {
   if (fx.schnaps > 0)     fx.schnaps     = Math.max(0, fx.schnaps     - realDt);
   // Geduld is cleared at the wave transition, not decremented by realDt.
   if (fx.rhythmusSec > 0) fx.rhythmusSec = Math.max(0, fx.rhythmusSec - realDt);
-  // Anker / Zoom are interpreted as real-time windows (4 s / 3 s).
+  // Anker is a real-time window; Zoom remains wave-bound.
   if (fx.ankerSh > 0)     fx.ankerSh     = Math.max(0, fx.ankerSh     - realDt);
   // Zoom is wave-bound now — cleared in startWaveBreather, not by real-time decay.
-  // Adlerauge — auto-revert the apple zoom when the 3 s window expires.
+  // Adlerauge — auto-revert the apple zoom when its timer expires.
   if (fx.adlerSec > 0) {
     const prev = fx.adlerSec;
     fx.adlerSec = Math.max(0, fx.adlerSec - realDt);
@@ -4461,7 +4463,7 @@ window.addEventListener('contextmenu', (e) => {
   if (document.getElementById('start').style.display !== 'none') return;
   e.preventDefault();
   if (state.fx.zeitlupeReady) {
-    state.fx.zeitlupe = 2.0;
+    state.fx.zeitlupe = SHORT_BONUS_DURATION_SEC;
     state.fx.zeitlupeReady = false;
     updateActiveFx();
   }
@@ -6565,8 +6567,8 @@ function tick() {
   // like the 2D sandbox's cam.x/cam.y: it makes the world wobble even when
   // the player holds the mouse perfectly still.
   const t = state.t;
-  // Atem anhalten halves both the drunkenness AND the positional drift for 4 s.
-  // Schnaps doubles drunkenness for 5 s (risky trade — only affects jitter).
+  // Atem anhalten halves both the drunkenness and the positional drift while active.
+  // Schnaps doubles drunkenness while active (risky trade — only affects jitter).
   const atemMul = state.fx.atem > 0 ? 0.5 : 1.0;
   const schnapsMul = state.fx.schnaps > 0 ? 2.0 : 1.0;
   const promMul = effectivePromilleMul();
