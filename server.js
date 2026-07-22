@@ -23,10 +23,24 @@ const AITUNNEL_MODELS = (process.env.AITUNNEL_MODELS || 'gpt-5.4,gpt-5.2,gpt-5,g
 const questionPool = {};
 const audioQuestionPool = {};
 const ttsAudioCache = new Map();
+const spectatorRooms = new Map();
 const TTS_CACHE_LIMIT = Number(process.env.TTS_CACHE_LIMIT || 180);
+const SPECTATOR_ROOM_TTL_MS = 2 * 60 * 60 * 1000;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || process.env.ELEVEN_API_KEY || '';
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
 const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_turbo_v2_5';
+
+function validSpectatorRoomId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{16,80}$/.test(value);
+}
+
+const spectatorCleanupTimer = setInterval(() => {
+  const cutoff = Date.now() - SPECTATOR_ROOM_TTL_MS;
+  for (const [roomId, room] of spectatorRooms) {
+    if (!room || room.updatedAt < cutoff) spectatorRooms.delete(roomId);
+  }
+}, 10 * 60 * 1000);
+spectatorCleanupTimer.unref?.();
 
 const TOPIC_RULES = {
   'Infinitiv mit zu': `Verwende NUR Verben, die "zu + Infinitiv" verlangen: versuchen, beginnen, anfangen, aufhören, vorhaben, hoffen, vergessen, planen, sich freuen, Lust haben, Es ist wichtig/möglich/schwer... NIEMALS Modalverben (können, müssen, sollen, wollen, dürfen, mögen) — diese stehen mit Infinitiv OHNE "zu"! Richtig: "Er versucht, den Bahnhof zu finden." | Falsch: "Er kann den Bahnhof zu finden."`,
@@ -746,6 +760,38 @@ app.post('/api/tts', async (req, res) => {
     console.error('ElevenLabs TTS error:', err);
     res.status(502).json({ error: 'ElevenLabs TTS request failed', detail: err?.message || String(err) });
   }
+});
+
+app.put('/api/spectator/:roomId/state', (req, res) => {
+  const { roomId } = req.params;
+  if (!validSpectatorRoomId(roomId)) {
+    return res.status(400).json({ error: 'Invalid spectator room id' });
+  }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Invalid spectator snapshot' });
+  }
+
+  spectatorRooms.set(roomId, {
+    snapshot: req.body,
+    updatedAt: Date.now(),
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(204).end();
+});
+
+app.get('/api/spectator/:roomId/state', (req, res) => {
+  const { roomId } = req.params;
+  if (!validSpectatorRoomId(roomId)) {
+    return res.status(400).json({ error: 'Invalid spectator room id' });
+  }
+
+  const room = spectatorRooms.get(roomId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!room) return res.status(204).end();
+  res.json({
+    snapshot: room.snapshot,
+    updatedAt: room.updatedAt,
+  });
 });
 
 

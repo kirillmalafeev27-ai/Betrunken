@@ -1195,6 +1195,90 @@
     opacity: 0.45;
     cursor: not-allowed;
   }
+  #share-link-btn {
+    background: #263b48 !important;
+    color: #e8f6ff !important;
+    border: 1px solid rgba(126, 206, 255, 0.5) !important;
+  }
+  #share-link-btn:hover { background: #315264 !important; }
+  #share-link-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  #share-status {
+    width: 100%;
+    min-height: 18px;
+    color: #8fd6ff;
+    font-size: 12px;
+    text-align: center;
+  }
+  #shared-role {
+    position: absolute;
+    inset: 0;
+    z-index: 70;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(8, 7, 6, 0.82);
+    backdrop-filter: blur(8px);
+    cursor: auto;
+  }
+  #shared-role.on { display: flex; }
+  #shared-role .panel {
+    width: min(560px, calc(100vw - 32px));
+    padding: 30px;
+    text-align: center;
+    background: var(--panel);
+    border: 1px solid rgba(200,144,96,0.35);
+    border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.65);
+  }
+  #shared-role h2 { margin: 0 0 10px; color: var(--accent); }
+  #shared-role p { color: var(--text-dim); line-height: 1.5; }
+  #shared-role .summary {
+    margin: 16px 0;
+    padding: 12px;
+    color: #f4dfc5;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  #shared-role .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  #shared-role button {
+    padding: 13px 16px;
+    border: 1px solid rgba(200,144,96,0.45);
+    border-radius: 8px;
+    background: var(--accent);
+    color: #17130f;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  #shared-role button.secondary { background: #315264; color: #eef9ff; border-color: #78c8f5; }
+  #shared-role button:disabled { opacity: 0.5; cursor: wait; }
+  #shared-role-status { min-height: 20px; margin-top: 12px; color: #8fd6ff; font-size: 12px; }
+  #spectator-badge {
+    position: absolute;
+    top: 92px;
+    left: 50%;
+    z-index: 18;
+    display: none;
+    transform: translateX(-50%);
+    padding: 7px 12px;
+    border: 1px solid rgba(126,206,255,0.55);
+    border-radius: 999px;
+    background: rgba(13,31,42,0.88);
+    color: #bfe9ff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+  }
+  body.spectator #spectator-badge { display: block; }
+  body.spectator #controls,
+  body.spectator #touch-controls,
+  body.spectator #restart-btn,
+  body.spectator #se-restart,
+  body.spectator #view-nudge,
+  body.spectator #audio-replay { display: none !important; }
+  body.spectator #bonus-bar { pointer-events: none; }
   .bonus-tile .topic {
     margin-top: 3px;
     color: var(--text-dim);
@@ -1316,6 +1400,8 @@
 
   <div id="zinsen-prompt">Выбери ещё один бонус — Zinsen</div>
 
+  <div id="spectator-badge">ПРЕПОДАВАТЕЛЬ · ОЖИДАНИЕ УЧЕНИКА</div>
+
   <div id="rhythmus-bar"><div id="rhythmus-thumb"></div></div>
 
   <div id="sub-picker">
@@ -1408,6 +1494,19 @@
     </div>
   </div>
 
+  <div id="shared-role">
+    <div class="panel">
+      <h2>Общая игровая сессия</h2>
+      <p>Все параметры уже загружены из ссылки. Выберите, как открыть эту сессию.</p>
+      <div class="summary" id="shared-config-summary"></div>
+      <div class="actions">
+        <button id="shared-teacher" class="secondary" type="button">Преподаватель</button>
+        <button id="shared-student" type="button">Ученик</button>
+      </div>
+      <div id="shared-role-status"></div>
+    </div>
+  </div>
+
   <div id="start" style="display:none">
     <div class="panel">
       <h2>BETRUNKEN</h2>
@@ -1447,7 +1546,9 @@
         </div>
         <div class="learning-actions">
           <button id="start-btn" type="button" disabled>Начать</button>
+          <button id="share-link-btn" type="button" disabled>Режим зрителя · скопировать ссылку</button>
           <span id="learning-status">Загрузка ассетов...</span>
+          <span id="share-status"></span>
         </div>
       </div>
     </div>
@@ -1873,7 +1974,7 @@ const state = {
     vorahnungSh: 0,
     vorahnungQueue: [],    // pre-rolled upcoming hiccups for the preview
     kocherShots: 0,        // free-shot counter (Köcher)
-    glueckShots: 0,        // free-miss-promille counter (Glückschuss)
+    glueckShots: 0,        // wrong-answer-promille shields (Glückschuss)
     zinsenPending: false,  // first Zinsen pick done — awaiting second tile click
     geistSh: 0,
     doppelSh: 0,
@@ -1887,9 +1988,9 @@ const state = {
   trails: [],        // leuchtspur dotted trails (auto-fading)
   ghostBolt: null,   // geist-pfeil ghost arrow object
   // Promille — hidden drunkenness pressure gauge that scales drunk + drift.
-  // Range 0..100. Grows from time / misses / Schnaps; falls from good hits / Kaffee.
+  // Range 0..100. Grows from time / wrong answers / Schnaps; falls from good hits / Kaffee.
   promille: 0,
-  // Wave system — 1..7, with breather between active windows. Wave debuffs are
+  // Wave system — 1..12, with breather between active windows. Wave debuffs are
   // applied based on the current waves's debuff list (which may inherit
   // previous waves on 5 / 6).
   wave: {
@@ -1943,6 +2044,22 @@ const state = {
   idleDrift: 0,       // accumulated pitch offset from the idle drift, applied
                       // directly to camera.rotation.x (no spring damping).
 };
+
+const sharedSession = {
+  roomId: null,
+  config: null,
+  role: null,          // 'teacher' | 'student'
+  pendingRole: null,
+  latestSnapshot: null,
+  broadcastTimer: null,
+  pollTimer: null,
+  sending: false,
+  polling: false,
+};
+
+function isSpectatorMode() {
+  return sharedSession.role === 'teacher';
+}
 
 // ---------------------------------------------------------------------------
 // UI bindings
@@ -2014,7 +2131,7 @@ const BONUS_CATEGORIES = [
       { id: 'kaffee', pos: 1, name: 'Kaffee', desc: 'снимает 50 пунктов промилле и сбивает debuff' },
   ]},
   { id: 'info', title: 'Чтение', subs: [
-      { id: 'rhythmus',  pos: 4, name: 'Glückschuss', desc: 'следующие 2 промаха не наказывают опьянением' },
+      { id: 'rhythmus',  pos: 4, name: 'Glückschuss', desc: 'следующие 2 неправильных ответа не добавляют промилле' },
       { id: 'geist',     pos: 3, name: 'Точка',        desc: 'яркая точка в центре экрана для точного прицела' },
       { id: 'doppel',    pos: 2, name: 'Doppelschuss', desc: 'один выстрел = два болта с разлётом, больше шанс попасть' },
       { id: 'vorahnung', pos: 1, name: 'Vorahnung',    desc: 'видны все предстоящие толчки камеры вплоть до выстрела' },
@@ -2867,6 +2984,234 @@ function defaultLearningSlots() {
   });
 }
 
+const SHARED_CONFIG_PARAM = 'cfg';
+const SHARED_ROOM_PARAM = 'room';
+
+function clampSharedNumber(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function encodeSharedConfig(config) {
+  const bytes = new TextEncoder().encode(JSON.stringify(config));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeSharedConfig(encoded) {
+  if (typeof encoded !== 'string' || encoded.length > 12000 || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
+  try {
+    const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((encoded.length + 3) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+    const config = JSON.parse(new TextDecoder().decode(bytes));
+    return config && typeof config === 'object' && !Array.isArray(config) ? config : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function createSharedRoomId() {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function collectSharedConfig() {
+  return {
+    version: 1,
+    learning: {
+      mode: state.learning.mode,
+      level: state.learning.level,
+      lexicalTopic: state.learning.lexicalTopic,
+      selectedSlotIndex: state.learning.selectedSlotIndex,
+      grammarSlots: state.learning.grammarSlots.map(slot => ({
+        bonusId: slot.bonusId,
+        grammarTopic: slot.grammarTopic,
+      })),
+    },
+    gameplay: {
+      drunk: state.drunk,
+      damp: state.damp,
+      cameraDrift: state.cameraDrift,
+      recoilStrength: state.recoilStrength,
+    },
+    spawns: state.spawns.slice(0, 24).map(spawn => ({
+      x: Number(spawn.x),
+      y: Number(spawn.y),
+      z: Number(spawn.z),
+      size: Number(spawn.size),
+    })),
+  };
+}
+
+function validSharedSpawns(spawns) {
+  if (!Array.isArray(spawns)) return [];
+  return spawns.slice(0, 24).map(spawn => ({
+    x: clampSharedNumber(spawn?.x, -30, 30, 0),
+    y: clampSharedNumber(spawn?.y, 0, 12, 2.45),
+    z: clampSharedNumber(spawn?.z, -30, 30, -8),
+    size: clampSharedNumber(spawn?.size, 0.04, 1.5, 0.24),
+  }));
+}
+
+function applySharedConfig(config) {
+  const learning = config?.learning || {};
+  if (learning.mode === 'grammar' || learning.mode === 'audio') state.learning.mode = learning.mode;
+  if (LANGUAGE_LEVELS.includes(learning.level)) state.learning.level = learning.level;
+  if (LEXICAL_TOPICS.includes(learning.lexicalTopic)) state.learning.lexicalTopic = learning.lexicalTopic;
+
+  const slots = defaultLearningSlots();
+  if (Array.isArray(learning.grammarSlots)) {
+    state.learning.grammarSlots = slots.map((slot, index) => {
+      const sharedSlot = learning.grammarSlots[index];
+      const grammarTopic = GRAMMAR_TOPICS.includes(sharedSlot?.grammarTopic)
+        ? sharedSlot.grammarTopic
+        : slot.grammarTopic;
+      return { ...slot, grammarTopic, isWortstellung: isWortstellungTopic(grammarTopic) };
+    });
+  }
+  state.learning.selectedSlotIndex = Number.isInteger(learning.selectedSlotIndex)
+    ? Math.max(0, Math.min(BONUS_CATEGORIES.length - 1, learning.selectedSlotIndex))
+    : 0;
+
+  const gameplay = config?.gameplay || {};
+  state.drunk = clampSharedNumber(gameplay.drunk, 0, 5, state.drunk);
+  state.damp = clampSharedNumber(gameplay.damp, 0.5, 10, state.damp);
+  state.cameraDrift = clampSharedNumber(gameplay.cameraDrift, 0, 2, state.cameraDrift);
+  state.recoilStrength = clampSharedNumber(gameplay.recoilStrength, 0, 2, state.recoilStrength);
+
+  const sliderValues = [
+    ['drunk', state.drunk, value => value.toFixed(2)],
+    ['damp', state.damp, value => value.toFixed(1)],
+    ['cam', state.cameraDrift, value => value.toFixed(2)],
+    ['recoil', state.recoilStrength, value => value.toFixed(2)],
+  ];
+  for (const [id, value, format] of sliderValues) {
+    const slider = document.getElementById('s-' + id);
+    const output = document.getElementById('s-' + id + '-v');
+    if (slider) slider.value = String(value);
+    if (output) output.textContent = format(value);
+  }
+
+  config.spawns = validSharedSpawns(config.spawns);
+  configureQuestionBank();
+}
+
+function readSharedLink() {
+  const params = new URLSearchParams(window.location.search);
+  const roomId = params.get(SHARED_ROOM_PARAM) || '';
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(roomId)) return null;
+  const config = decodeSharedConfig(params.get(SHARED_CONFIG_PARAM) || '');
+  return config ? { roomId, config } : null;
+}
+
+function sharedConfigSummary(config) {
+  const learning = config.learning || {};
+  const mode = learning.mode === 'audio' ? 'Аудио' : 'Грамматика';
+  const topics = Array.isArray(learning.grammarSlots)
+    ? learning.grammarSlots.map(slot => slot?.grammarTopic).filter(Boolean).join(' · ')
+    : '';
+  return `${mode} · ${learning.level || '—'} · ${learning.lexicalTopic || '—'}` + (topics ? `\n${topics}` : '');
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) { /* use the DOM fallback below */ }
+
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+  input.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+  input.remove();
+  return copied;
+}
+
+async function copySpectatorLink() {
+  const status = document.getElementById('share-status');
+  const config = collectSharedConfig();
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set(SHARED_ROOM_PARAM, createSharedRoomId());
+  url.searchParams.set(SHARED_CONFIG_PARAM, encodeSharedConfig(config));
+  if (status) status.dataset.url = url.toString();
+  const copied = await copyTextToClipboard(url.toString());
+  if (status) status.textContent = copied
+    ? 'Ссылка скопирована. Откройте её на устройствах преподавателя и ученика.'
+    : 'Не удалось скопировать автоматически. Разрешите доступ к буферу обмена и попробуйте снова.';
+}
+
+function showSharedRoleChooser() {
+  const overlay = document.getElementById('shared-role');
+  const summary = document.getElementById('shared-config-summary');
+  if (summary) summary.textContent = sharedConfigSummary(sharedSession.config);
+  if (overlay) overlay.classList.add('on');
+}
+
+function setSharedRoleControlsDisabled(disabled) {
+  const teacher = document.getElementById('shared-teacher');
+  const student = document.getElementById('shared-student');
+  if (teacher) teacher.disabled = disabled;
+  if (student) student.disabled = disabled;
+}
+
+function chooseSharedRole(role) {
+  if (!sharedSession.roomId || (role !== 'teacher' && role !== 'student')) return;
+  sharedSession.pendingRole = role;
+  setSharedRoleControlsDisabled(true);
+  const status = document.getElementById('shared-role-status');
+  if (status) status.textContent = state.learning.assetsReady
+    ? 'Открываю игровое поле...'
+    : 'Роль выбрана. Загружаю игровую сцену...';
+  if (role === 'student') AudioFx.ensure();
+  finishSharedRoleStart();
+}
+
+function finishSharedRoleStart() {
+  if (!sharedSession.pendingRole || !state.learning.assetsReady) return;
+  sharedSession.role = sharedSession.pendingRole;
+  sharedSession.pendingRole = null;
+  configureQuestionBank();
+  closeSpawnEditor();
+  document.getElementById('shared-role')?.classList.remove('on');
+  document.getElementById('start').style.display = 'none';
+  respawnApple();
+  updateQuestionBanner();
+  renderBonusBar();
+
+  if (isSpectatorMode()) {
+    document.body.classList.add('spectator', 'cursor-on');
+    unlockPointer();
+    startSpectatorPolling();
+  } else {
+    document.body.classList.remove('spectator');
+    hideCursor();
+    startStudentBroadcasting();
+  }
+}
+
+function initSharedLinkMode() {
+  const shared = readSharedLink();
+  if (!shared) return;
+  sharedSession.roomId = shared.roomId;
+  sharedSession.config = shared.config;
+  applySharedConfig(shared.config);
+  showSharedRoleChooser();
+}
+
 state.learning.questionBank = new QuestionBank();
 state.learning.grammarSlots = defaultLearningSlots();
 configureQuestionBank();
@@ -3063,6 +3408,7 @@ function renderGrammarPicker() {
 
 function updateLearningStartButton() {
   const startBtn = document.getElementById('start-btn');
+  const shareBtn = document.getElementById('share-link-btn');
   const status = document.getElementById('learning-status');
   const grammarReady = state.learning.grammarSlots.length === BONUS_CATEGORIES.length &&
     state.learning.grammarSlots.every(slot => slot && slot.grammarTopic);
@@ -3073,6 +3419,7 @@ function updateLearningStartButton() {
     (state.learning.mode === 'audio' || grammarReady)
   );
   if (startBtn) startBtn.disabled = !ready;
+  if (shareBtn) shareBtn.disabled = !ready;
   if (status) {
     status.textContent = state.learning.assetsReady
       ? (ready
@@ -3085,6 +3432,7 @@ function updateLearningStartButton() {
 function initLearningMenu() {
   loadLearningState();
   configureQuestionBank();
+  initSharedLinkMode();
   renderLearningMenu();
   const startBtn = document.getElementById('start-btn');
   if (startBtn && !startBtn._learningBound) {
@@ -3097,6 +3445,21 @@ function initLearningMenu() {
       hideCursor();
       updateQuestionBanner();
     });
+  }
+  const shareBtn = document.getElementById('share-link-btn');
+  if (shareBtn && !shareBtn._shareBound) {
+    shareBtn._shareBound = true;
+    shareBtn.addEventListener('click', () => copySpectatorLink());
+  }
+  const teacherBtn = document.getElementById('shared-teacher');
+  if (teacherBtn && !teacherBtn._roleBound) {
+    teacherBtn._roleBound = true;
+    teacherBtn.addEventListener('click', () => chooseSharedRole('teacher'));
+  }
+  const studentBtn = document.getElementById('shared-student');
+  if (studentBtn && !studentBtn._roleBound) {
+    studentBtn._roleBound = true;
+    studentBtn.addEventListener('click', () => chooseSharedRole('student'));
   }
 }
 
@@ -3166,6 +3529,7 @@ function renderBonusBar() {
 
     el.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
+      if (isSpectatorMode()) return;
       // Zinsen second-pick mode: clicking ANY tile immediately opens its
       // picker instead of toggling the armed selection.
       if (state.fx.zinsenPending) {
@@ -3736,7 +4100,7 @@ function applySubEffect(subId) {
       rollVorahnungQueue();
       break;
     case 'rhythmus':
-      // Glückschuss: next 2 misses cost no promille.
+      // Glückschuss: next 2 wrong answers cost no promille.
       fx.glueckShots = 2;
       // Old metronome bar isn't shown anymore — keep rhythmusSec 0.
       fx.rhythmusSec = 0;
@@ -4186,6 +4550,7 @@ window.addEventListener('resize', () => {
 // the player is actively aiming; modals (sub-picker, session-end, Zinsen
 // pending, start screen) and the explicit Esc gesture release it.
 function pointerLockAllowed() {
+  if (isSpectatorMode()) return false;
   if (IS_TOUCH) return false;
   if (document.body.classList.contains('cursor-on')) return false;
   const startEl = document.getElementById('start');
@@ -4253,6 +4618,7 @@ function isHudTarget(t) {
 }
 window.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
+  if (isSpectatorMode()) return;
   markInput();
   if (document.getElementById('start').style.display !== 'none') return;
   if (isHudTarget(e.target)) return;
@@ -4276,6 +4642,7 @@ window.addEventListener('keydown', e => {
     showCursor();
     return;
   }
+  if (isSpectatorMode()) return;
   if (document.getElementById('start').style.display !== 'none') return;
   markInput();
   if (e.code === 'Space') { e.preventDefault(); tryShoot(); }
@@ -4681,12 +5048,16 @@ async function boot() {
   enableShadows(state.appleTemplate);
 
   loadSpawnsFromStorage();
+  if (sharedSession.config && Array.isArray(sharedSession.config.spawns)) {
+    state.spawns = validSharedSpawns(sharedSession.config.spawns);
+  }
   spawnApple();
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('start').style.display = 'flex';
   state.learning.assetsReady = true;
   updateLearningStartButton();
+  finishSharedRoleStart();
   document.getElementById('open-spawn-editor').addEventListener('click', openSpawnEditor);
 }
 
@@ -4773,7 +5144,8 @@ function makeAppleMesh(size, opts = {}) {
 }
 
 function appleVariantForWave() {
-  if (state.learning.currentQuiz) return { kind: 'normal' };
+  // Wave variants stay active for answer apples too. A quiz changes only the
+  // labels and answer metadata; it must not disable the current wave.
   // Wave-4 introduces variant apples (shrunken / pendulum / shield).
   // Returns a small descriptor consumed by spawnApple.
   const w = state.wave.num;
@@ -4964,6 +5336,300 @@ function respawnApple() {
   spawnApple();
 }
 
+function snapshotNumber(value, digits = 4) {
+  return Number.isFinite(value) ? Number(value.toFixed(digits)) : 0;
+}
+
+function snapshotTransform(obj) {
+  return {
+    p: [snapshotNumber(obj.position.x), snapshotNumber(obj.position.y), snapshotNumber(obj.position.z)],
+    q: [snapshotNumber(obj.quaternion.x), snapshotNumber(obj.quaternion.y), snapshotNumber(obj.quaternion.z), snapshotNumber(obj.quaternion.w)],
+    s: [snapshotNumber(obj.scale.x), snapshotNumber(obj.scale.y), snapshotNumber(obj.scale.z)],
+  };
+}
+
+function spectatorUiText(selector, childSelector) {
+  const root = document.querySelector(selector);
+  const child = root && childSelector ? root.querySelector(childSelector) : root;
+  return child?.textContent || '';
+}
+
+function buildSpectatorSnapshot() {
+  const questionBanner = document.getElementById('question-banner');
+  const waveBanner = document.getElementById('wave-banner');
+  const sessionEnd = document.getElementById('session-end');
+  return {
+    version: 1,
+    sentAt: Date.now(),
+    camera: {
+      ...snapshotTransform(camera),
+      fov: snapshotNumber(camera.fov, 2),
+    },
+    crossbow: state.crossbow ? snapshotTransform(state.crossbow) : null,
+    stats: {
+      shots: state.shots,
+      hits: state.hits,
+      score: state.score,
+      euros: state.euros,
+      boltsLeft: state.boltsLeft,
+      boltRegenTimer: snapshotNumber(state.boltRegenTimer, 2),
+      promille: snapshotNumber(state.promille, 2),
+    },
+    wave: {
+      num: state.wave.num,
+      phase: state.wave.phase,
+      timer: snapshotNumber(state.wave.timer, 2),
+      waveT: snapshotNumber(state.wave.waveT, 2),
+      tunnel: snapshotNumber(state.wave.tunnel, 3),
+    },
+    selectedTileId: state.selectedTileId,
+    bonusTiles: state.bonusTiles.map(tile => ({ id: tile.id, t: snapshotNumber(tile.t, 3) })),
+    apples: state.apples.slice(0, 48).map(apple => ({
+      ...snapshotTransform(apple.obj),
+      size: snapshotNumber(apple.size || 0.2, 3),
+      labelText: String(apple.labelText || '').slice(0, 240),
+      pairId: apple.pairId || null,
+      isGhost: Boolean(apple.isGhost),
+      shieldHits: Number(apple.shieldHits || 0),
+    })),
+    bolts: state.bolts.slice(0, 24).map(bolt => snapshotTransform(bolt.obj)),
+    ui: {
+      waveTag: spectatorUiText('#wave-tag'),
+      activeFx: spectatorUiText('#active-fx'),
+      question: {
+        on: Boolean(questionBanner?.classList.contains('on')),
+        topic: spectatorUiText('#question-banner', '.qb-topic'),
+        text: spectatorUiText('#question-banner', '.qb-text'),
+        display: spectatorUiText('#question-banner', '.qb-display'),
+        feedback: spectatorUiText('#question-banner', '.qb-feedback'),
+      },
+      waveBanner: {
+        on: Boolean(waveBanner?.classList.contains('on')),
+        title: spectatorUiText('#wave-banner', '.wb-title'),
+        sub: spectatorUiText('#wave-banner', '.wb-sub'),
+        count: spectatorUiText('#wave-banner', '.wb-count'),
+      },
+      sessionEnded: Boolean(sessionEnd?.classList.contains('on')),
+      sessionStats: spectatorUiText('#se-stats'),
+    },
+  };
+}
+
+async function sendStudentSnapshot() {
+  if (sharedSession.role !== 'student' || !sharedSession.roomId || sharedSession.sending) return;
+  sharedSession.sending = true;
+  try {
+    await fetch('/api/spectator/' + encodeURIComponent(sharedSession.roomId) + '/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildSpectatorSnapshot()),
+      cache: 'no-store',
+    });
+  } catch (_) {
+    // A temporary network failure must not interrupt the student's game.
+  } finally {
+    sharedSession.sending = false;
+  }
+}
+
+function startStudentBroadcasting() {
+  if (sharedSession.broadcastTimer) clearInterval(sharedSession.broadcastTimer);
+  sendStudentSnapshot();
+  sharedSession.broadcastTimer = setInterval(sendStudentSnapshot, 250);
+}
+
+async function pollSpectatorSnapshot() {
+  if (!isSpectatorMode() || !sharedSession.roomId || sharedSession.polling) return;
+  sharedSession.polling = true;
+  const badge = document.getElementById('spectator-badge');
+  try {
+    const response = await fetch('/api/spectator/' + encodeURIComponent(sharedSession.roomId) + '/state', {
+      cache: 'no-store',
+    });
+    if (response.status === 204) {
+      if (badge) badge.textContent = 'ПРЕПОДАВАТЕЛЬ · ОЖИДАНИЕ УЧЕНИКА';
+      return;
+    }
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (data?.snapshot && typeof data.snapshot === 'object') {
+      sharedSession.latestSnapshot = data.snapshot;
+      const stale = Date.now() - Number(data.updatedAt || 0) > 4000;
+      if (badge) badge.textContent = stale
+        ? 'ПРЕПОДАВАТЕЛЬ · СВЯЗЬ С УЧЕНИКОМ ПРЕРВАНА'
+        : 'ПРЕПОДАВАТЕЛЬ · УЧЕНИК В ИГРЕ';
+    }
+  } catch (_) {
+    if (badge) badge.textContent = 'ПРЕПОДАВАТЕЛЬ · НЕТ СВЯЗИ';
+  } finally {
+    sharedSession.polling = false;
+  }
+}
+
+function startSpectatorPolling() {
+  if (sharedSession.pollTimer) clearInterval(sharedSession.pollTimer);
+  pollSpectatorSnapshot();
+  sharedSession.pollTimer = setInterval(pollSpectatorSnapshot, 250);
+}
+
+function validTransformPart(part, length) {
+  return Array.isArray(part) && part.length === length && part.every(Number.isFinite);
+}
+
+function applySnapshotTransform(obj, transform) {
+  if (!obj || !transform) return;
+  if (validTransformPart(transform.p, 3)) obj.position.fromArray(transform.p);
+  if (validTransformPart(transform.q, 4)) obj.quaternion.fromArray(transform.q).normalize();
+  if (validTransformPart(transform.s, 3)) obj.scale.fromArray(transform.s);
+}
+
+function removeSpectatorApple(entry) {
+  if (!entry) return;
+  scene.remove(entry.obj);
+  removeAppleLabel(entry);
+}
+
+function syncSpectatorApples(remoteApples) {
+  const incoming = Array.isArray(remoteApples) ? remoteApples.slice(0, 48) : [];
+  while (state.apples.length > incoming.length) removeSpectatorApple(state.apples.pop());
+
+  for (let index = 0; index < incoming.length; index++) {
+    const remote = incoming[index] || {};
+    const size = clampSharedNumber(remote.size, 0.04, 1.5, 0.2);
+    const signature = `${size}:${remote.pairId ? 1 : 0}:${Number(remote.shieldHits || 0) > 0 ? 1 : 0}`;
+    let local = state.apples[index];
+    if (!local || local._spectatorSignature !== signature) {
+      if (local) removeSpectatorApple(local);
+      const appleObj = makeAppleMesh(size, {
+        translucent: Boolean(remote.pairId),
+        shield: Number(remote.shieldHits || 0) > 0,
+      });
+      scene.add(appleObj);
+      local = {
+        obj: appleObj,
+        hitbox: { center: appleObj.position.clone(), radius: size * 0.55 },
+        size,
+        labelText: '',
+        _spectatorSignature: signature,
+      };
+      state.apples[index] = local;
+    }
+
+    applySnapshotTransform(local.obj, remote);
+    local.hitbox.center.copy(local.obj.position);
+    local.isGhost = Boolean(remote.isGhost);
+    local.shieldHits = Number(remote.shieldHits || 0);
+    const labelText = String(remote.labelText || '').slice(0, 240);
+    if (local.labelText !== labelText) {
+      removeAppleLabel(local);
+      local.labelText = labelText;
+      if (labelText) attachAppleLabel(local, labelText);
+    }
+    positionAppleLabel(local);
+  }
+}
+
+function syncSpectatorBolts(remoteBolts) {
+  const incoming = Array.isArray(remoteBolts) ? remoteBolts.slice(0, 24) : [];
+  while (state.bolts.length > incoming.length) {
+    const bolt = state.bolts.pop();
+    if (bolt?.obj) scene.remove(bolt.obj);
+  }
+  if (!state.boltTemplate) return;
+  for (let index = 0; index < incoming.length; index++) {
+    let local = state.bolts[index];
+    if (!local?.obj) {
+      const obj = state.boltTemplate.clone(true);
+      obj.traverse(child => { if (child.isMesh && child.material) child.material = child.material.clone(); });
+      scene.add(obj);
+      local = { obj };
+      state.bolts[index] = local;
+    }
+    applySnapshotTransform(local.obj, incoming[index]);
+  }
+}
+
+function setSpectatorQuestion(question) {
+  const banner = document.getElementById('question-banner');
+  if (!banner) return;
+  banner.innerHTML = '';
+  banner.classList.toggle('on', Boolean(question?.on));
+  if (!question?.on) return;
+  const fields = [
+    ['qb-topic', question.topic],
+    ['qb-text', question.text],
+    ['qb-display', question.display],
+    ['qb-feedback', question.feedback],
+  ];
+  for (const [className, value] of fields) {
+    if (!value) continue;
+    const element = document.createElement('div');
+    element.className = className;
+    element.textContent = String(value).slice(0, 1000);
+    banner.appendChild(element);
+  }
+}
+
+function applySpectatorSnapshot() {
+  const snapshot = sharedSession.latestSnapshot;
+  if (!snapshot || snapshot.version !== 1) return;
+  applySnapshotTransform(camera, snapshot.camera);
+  if (Number.isFinite(snapshot.camera?.fov)) {
+    camera.fov = clampSharedNumber(snapshot.camera.fov, 25, 100, 55);
+    camera.updateProjectionMatrix();
+  }
+  if (state.crossbow && snapshot.crossbow) applySnapshotTransform(state.crossbow, snapshot.crossbow);
+
+  const stats = snapshot.stats || {};
+  state.shots = Math.max(0, Number(stats.shots) || 0);
+  state.hits = Math.max(0, Number(stats.hits) || 0);
+  state.score = Math.max(0, Number(stats.score) || 0);
+  state.euros = Math.max(0, Number(stats.euros) || 0);
+  state.boltsLeft = Math.max(0, Math.min(state.boltMax, Number(stats.boltsLeft) || 0));
+  state.boltRegenTimer = Math.max(0, Number(stats.boltRegenTimer) || 0);
+  state.promille = Math.max(0, Math.min(100, Number(stats.promille) || 0));
+  updateStats();
+  updateAmmo();
+  applyPromilleUi();
+
+  const wave = snapshot.wave || {};
+  if (Number.isFinite(wave.num)) state.wave.num = Math.max(1, Math.min(WAVE_CONFIG.length, wave.num));
+  if (wave.phase === 'breather' || wave.phase === 'active' || wave.phase === 'ended') state.wave.phase = wave.phase;
+  if (Number.isFinite(wave.timer)) state.wave.timer = wave.timer;
+  if (Number.isFinite(wave.waveT)) state.wave.waveT = wave.waveT;
+  state.wave.tunnel = clampSharedNumber(wave.tunnel, 0, 1, 0);
+  document.getElementById('tunnel').style.opacity = state.wave.tunnel.toFixed(3);
+
+  const tileTimes = new Map((Array.isArray(snapshot.bonusTiles) ? snapshot.bonusTiles : []).map(tile => [tile?.id, tile?.t]));
+  for (const tile of state.bonusTiles) {
+    const value = tileTimes.get(tile.id);
+    if (Number.isFinite(value)) tile.t = Math.max(0, Math.min(tile.subs.length, value));
+  }
+  state.selectedTileId = typeof snapshot.selectedTileId === 'string' ? snapshot.selectedTileId : null;
+  updateBonusOpacities();
+  document.querySelectorAll('#bonus-bar .bonus-tile').forEach(tile => {
+    tile.classList.toggle('selected', tile.dataset.id === state.selectedTileId);
+  });
+
+  syncSpectatorApples(snapshot.apples);
+  syncSpectatorBolts(snapshot.bolts);
+
+  const ui = snapshot.ui || {};
+  document.getElementById('wave-tag').textContent = String(ui.waveTag || '').slice(0, 300);
+  document.getElementById('active-fx').textContent = String(ui.activeFx || '').slice(0, 500);
+  setSpectatorQuestion(ui.question);
+
+  const waveBanner = document.getElementById('wave-banner');
+  waveBanner.classList.toggle('on', Boolean(ui.waveBanner?.on));
+  waveBanner.querySelector('.wb-title').textContent = String(ui.waveBanner?.title || '').slice(0, 200);
+  waveBanner.querySelector('.wb-sub').textContent = String(ui.waveBanner?.sub || '').slice(0, 400);
+  waveBanner.querySelector('.wb-count').textContent = String(ui.waveBanner?.count || '').slice(0, 40);
+
+  const sessionEnd = document.getElementById('session-end');
+  sessionEnd.classList.toggle('on', Boolean(ui.sessionEnded));
+  if (ui.sessionEnded) document.getElementById('se-stats').textContent = String(ui.sessionStats || '').slice(0, 1000);
+}
+
 // ---------------------------------------------------------------------------
 // Spawn editor — runs before the start screen so the player can place apple
 // spawn points anywhere along the line of sight, save them to localStorage,
@@ -5103,6 +5769,7 @@ function closeSpawnEditor() {
 // Shooting
 // ---------------------------------------------------------------------------
 function tryShoot() {
+  if (isSpectatorMode()) return;
   if (!state.boltTemplate) return;
   if (!state.canShoot) return;
   if (tileChoiceOpen()) return;
@@ -5327,6 +5994,14 @@ function resolveQuizAnswerHit(b, appleIndex, apple) {
   if (!correct) {
     state.streak = 0;
     state.learning.wrongAnswers++;
+    // Promille is penalised only for a wrong answer, never for a shot that
+    // simply misses every apple. Glückschuss absorbs up to two penalties.
+    if (state.fx.glueckShots > 0) {
+      state.fx.glueckShots--;
+      updateActiveFx();
+    } else {
+      bumpPromilleWrongAnswer();
+    }
     AudioFx.miss();
     shatterApple(appleIndex, b.hitPoint, b.dir);
     const hitCap = state.learning.wrongAnswers >= 3;
@@ -5462,7 +6137,7 @@ function shatterApple(idx, impactPoint, impactDir) {
 // ---------------------------------------------------------------------------
 // Waves & Promille (Phase 3) — global pressure curve.
 // Each wave is BREATHER_SEC of intro banner, then ACTIVE_SEC of play with its
-// debuff stack. After wave 7 the session ends and the recap overlay opens.
+// debuff stack. After the final configured wave the session ends and the recap opens.
 // ---------------------------------------------------------------------------
 const WAVE_DEFAULT_ACTIVE_SEC = 90;
 const WAVE_BREATHER_SEC = 3;
@@ -5528,7 +6203,7 @@ function showWaveBanner(title, sub, num) {
   if (!el) return;
   el.querySelector('.wb-title').textContent = title;
   el.querySelector('.wb-sub').textContent = sub;
-  el.querySelector('.wb-count').textContent = num + ' / 7';
+  el.querySelector('.wb-count').textContent = num + ' / ' + WAVE_CONFIG.length;
   el.classList.add('on');
 }
 function hideWaveBanner() {
@@ -5581,11 +6256,9 @@ function tickWave(realDt) {
   // Hover-bob the floating labels above each apple.
   tickAppleLabels();
 
-  // Promille creep — slow base + small per-wave bonus. Wave 1 is a sober
-  // warm-up: no accumulation, and the meter is pinned at zero.
-  if (state.wave.num <= 1) {
-    state.promille = 0;
-  } else {
+  // Promille creep — slow base + small per-wave bonus. Wave 1 has no passive
+  // accumulation, but a wrong-answer penalty must remain visible there too.
+  if (state.wave.num > 1) {
     const waveBonus = (state.wave.num - 2) * 0.12;
     state.promille = Math.min(100, state.promille + realDt * (0.30 + waveBonus) * 0.35);
   }
@@ -5714,6 +6387,10 @@ function triggerDoubling() {
         ? { ...a.pendulum, base: basePos.clone().add(offB), phase: a.pendulum.phase + Math.PI }
         : null,
       spec: a.spec,
+      // In quiz mode both visual copies represent the same answer. Whichever
+      // one is rolled as real must therefore resolve through the quiz path.
+      answerIndex: a.answerIndex,
+      answerText: a.answerText,
     };
     state.apples.push(twinEntry);
     // Twin inherits the original's label text — both copies must read
@@ -5740,11 +6417,8 @@ function bumpPromilleHit(zone) {
   else if (zone === 'mid') state.promille = Math.max(0, state.promille - 3);
   applyPromilleUi();
 }
-function bumpPromilleMiss() {
-  // Waves 1-3 don't penalise misses. Wave 1 is fully sober; waves 2-3
-  // let promille creep over time but skip the +10 spike on each miss.
-  if (state.wave.num < 4) return;
-  state.promille = Math.min(100, state.promille + 4);
+function bumpPromilleWrongAnswer() {
+  state.promille = Math.min(100, state.promille + 10);
   applyPromilleUi();
 }
 function effectivePromilleMul() {
@@ -5831,10 +6505,9 @@ function tick() {
   const realDt = Math.min(0.05, clock.getDelta());
   const startEl = document.getElementById('start');
   const startVisible = startEl && startEl.style.display !== 'none';
-  // Also freeze the world while a question is being generated — wave timer,
-  // bonus drain, fx timers and physics all pause until the quiz arrives.
-  const generating = state.learning && state.learning.loading;
-  const frozen = startVisible || generating;
+  // Only the start screen freezes the world. Question generation blocks
+  // shooting in tryShoot(), but wave pressure and its visuals keep running.
+  const frozen = startVisible;
 
   if (frozen) {
     // Lock the camera to its base pose so the crossbow doesn't sway on the
@@ -5855,6 +6528,17 @@ function tick() {
     // debuffs don't trigger the moment the game un-pauses.
     state.lastInputTime = state.t;
     state.lastShotTime = state.t;
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  if (isSpectatorMode()) {
+    // The teacher renders the student's authoritative snapshot and never
+    // advances a second local copy of waves, physics, timers or questions.
+    state.t += realDt;
+    applySpectatorSnapshot();
+    fire.intensity = 3.6 + Math.sin(state.t * 9.0) * 0.6 + Math.sin(state.t * 17) * 0.3;
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
     return;
@@ -6036,9 +6720,7 @@ function tick() {
         // have been shattered by an earlier in-flight bolt.
         if (b.hitAppleIdx >= 0 && b.hitAppleIdx < state.apples.length) {
           const apple = state.apples[b.hitAppleIdx];
-          if (state.learning.currentQuiz && Number.isInteger(apple.answerIndex)) {
-            resolveQuizAnswerHit(b, b.hitAppleIdx, apple);
-          } else if (apple.shieldHits > 1) {
+          if (apple.shieldHits > 1) {
             // Shielded apple: first hit cracks the shield, doesn't shatter.
             apple.shieldHits--;
             apple.obj.traverse(o => {
@@ -6049,6 +6731,10 @@ function tick() {
             AudioFx.hit();
             // Brief score-pop hint and no streak bonus on the first hit.
             showScorePop(b.hitPoints, b.hitZone);
+          } else if (state.learning.currentQuiz && Number.isInteger(apple.answerIndex)) {
+            // Wave armour applies to quiz apples too; once cracked, resolve
+            // the surviving apple as the answer it represents.
+            resolveQuizAnswerHit(b, b.hitAppleIdx, apple);
           } else {
             state.hits++;
             state.score += b.hitPoints || 0;
@@ -6106,9 +6792,6 @@ function tick() {
         b.missPlayed = true;
         onBonusMiss();
         flashGameNotice('Тебя шатает ещё больше при промахе.', 'danger', 1600);
-        // Glückschuss soaks up to two miss-promille penalties.
-        if (state.fx.glueckShots > 0) state.fx.glueckShots--;
-        else                          bumpPromilleMiss();
       }
     }
   }
