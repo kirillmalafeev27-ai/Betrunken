@@ -2994,8 +2994,85 @@ function clampSharedNumber(value, min, max, fallback) {
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
 }
 
+function roundSharedNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 1000) / 1000 : 0;
+}
+
+function quantizeSharedNumber(value, scale) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * scale) : 0;
+}
+
+// Compact v2 keeps spectator links comfortably below messaging limits. The
+// public config shape remains unchanged after decoding, so old v1 links and
+// the rest of the game continue to use the readable property names.
+function compactSharedConfig(config) {
+  const learning = config?.learning || {};
+  const gameplay = config?.gameplay || {};
+  const grammarSlots = Array.isArray(learning.grammarSlots) ? learning.grammarSlots : [];
+  const spawns = Array.isArray(config?.spawns) ? config.spawns : [];
+  return {
+    v: 2,
+    l: [
+      learning.mode === 'audio' ? 1 : 0,
+      LANGUAGE_LEVELS.indexOf(learning.level),
+      LEXICAL_TOPICS.indexOf(learning.lexicalTopic),
+      Number.isInteger(learning.selectedSlotIndex) ? learning.selectedSlotIndex : 0,
+      grammarSlots.slice(0, BONUS_CATEGORIES.length).map(slot => GRAMMAR_TOPICS.indexOf(slot?.grammarTopic)),
+    ],
+    g: [
+      roundSharedNumber(gameplay.drunk),
+      roundSharedNumber(gameplay.damp),
+      roundSharedNumber(gameplay.cameraDrift),
+      roundSharedNumber(gameplay.recoilStrength),
+    ],
+    // Coordinates use the editor sliders' own precision: 0.05 units for
+    // position and 0.01 for size. Storing integers keeps even 24 spawns short.
+    s: spawns.slice(0, 24).map(spawn => [
+      quantizeSharedNumber(spawn?.x, 20),
+      quantizeSharedNumber(spawn?.y, 20),
+      quantizeSharedNumber(spawn?.z, 20),
+      quantizeSharedNumber(spawn?.size, 100),
+    ]),
+  };
+}
+
+function expandSharedConfig(config) {
+  if (config?.v !== 2) return config;
+  const learning = Array.isArray(config.l) ? config.l : [];
+  const grammarTopics = Array.isArray(learning[4]) ? learning[4] : [];
+  const gameplay = Array.isArray(config.g) ? config.g : [];
+  const spawns = Array.isArray(config.s) ? config.s : [];
+  return {
+    version: 2,
+    learning: {
+      mode: learning[0] === 1 ? 'audio' : 'grammar',
+      level: LANGUAGE_LEVELS[learning[1]],
+      lexicalTopic: LEXICAL_TOPICS[learning[2]],
+      selectedSlotIndex: Number.isInteger(learning[3]) ? learning[3] : 0,
+      grammarSlots: BONUS_CATEGORIES.map((category, index) => ({
+        bonusId: category.id,
+        grammarTopic: GRAMMAR_TOPICS[grammarTopics[index]],
+      })),
+    },
+    gameplay: {
+      drunk: gameplay[0],
+      damp: gameplay[1],
+      cameraDrift: gameplay[2],
+      recoilStrength: gameplay[3],
+    },
+    spawns: spawns.map(spawn => ({
+      x: Array.isArray(spawn) ? spawn[0] / 20 : undefined,
+      y: Array.isArray(spawn) ? spawn[1] / 20 : undefined,
+      z: Array.isArray(spawn) ? spawn[2] / 20 : undefined,
+      size: Array.isArray(spawn) ? spawn[3] / 100 : undefined,
+    })),
+  };
+}
+
 function encodeSharedConfig(config) {
-  const bytes = new TextEncoder().encode(JSON.stringify(config));
+  const bytes = new TextEncoder().encode(JSON.stringify(compactSharedConfig(config)));
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -3008,7 +3085,8 @@ function decodeSharedConfig(encoded) {
     const binary = atob(padded);
     const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
     const config = JSON.parse(new TextDecoder().decode(bytes));
-    return config && typeof config === 'object' && !Array.isArray(config) ? config : null;
+    const expanded = expandSharedConfig(config);
+    return expanded && typeof expanded === 'object' && !Array.isArray(expanded) ? expanded : null;
   } catch (_) {
     return null;
   }
